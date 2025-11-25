@@ -260,3 +260,32 @@ async def handle_plain_text(message: types.Message):
         await log_other_message(txt, user=user)
     except:
         pass
+
+async def handle_plain_text_recovery(user_id: int, text: str, username: str = None):
+    """
+    Обертка для восстановления очереди.
+    Эмулирует настоящее сообщение, чтобы переиспользовать логику handle_link.
+    """
+    from aiogram.types import User, Chat
+    from datetime import datetime
+    from loader import bot
+    
+    # Создаем фейковые объекты
+    mock_user = User(id=user_id, is_bot=False, first_name="Recovered", username=username or "Unknown")
+    mock_chat = Chat(id=user_id, type="private")
+    
+    mock_message = types.Message(
+        message_id=0, 
+        date=datetime.now(), 
+        chat=mock_chat, 
+        from_user=mock_user, 
+        text=text,
+        bot=bot
+    )
+    
+    # Если это ссылка - запускаем как ссылку
+    if "http" in text:
+        await handle_link(mock_message)
+    else:
+        # Если просто текст
+        await handle_plain_text(mock_message)
