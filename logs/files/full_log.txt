@@ -7,3 +7,125 @@
 2025-11-25T03:13:28.737451 | USER_REQ | user:spamtest(1234567) | https://www.tiktok.com/@user/video/12345
 2025-11-25T03:13:28.907651 | USER_REQ | user:spamtest(1234567) | https://www.tiktok.com/@user/video/12345
 2025-11-25T03:13:29.059925 | USER_REQ | user:spamtest(1234567) | https://www.tiktok.com/@user/video/12345
+2025-11-25T03:14:59.401288 | SYSTEM |  | Система остановлена.
+2025-11-25T03:15:04.996423 | SYSTEM |  | Система запущена (Clean Start).
+2025-11-25T03:15:12.570720 | USER_REQ | user:ch4rov(708208281) | <https://vm.tiktok.com/ZMAgLGm4D/>
+2025-11-25T03:15:12.571728 | USER_REQ | user:ch4rov(708208281) | <<https://vm.tiktok.com/ZMAgLGm4D/>>
+2025-11-25T03:15:17.870283 | SUCCESS | user:ch4rov(708208281) | Успешно (<https://vm.tiktok.com/ZMAgLGm4D/>)
+2025-11-25T03:15:17.871266 | SUCCESS | user:ch4rov(708208281) | Успешно (<<https://vm.tiktok.com/ZMAgLGm4D/>>)
+2025-11-25T03:17:26.566375 | USER_REQ | user:ch4rov(708208281) | <https://www.instagram.com/reel/DO8cOccDC-d/?igsh=eXRpbHJvYmFvZXlv>
+2025-11-25T03:17:26.567377 | USER_REQ | user:ch4rov(708208281) | <https://www.instagram.com/reel/DO8cOccDC-d/?igsh=eXRpbHJvYmFvZXlv>
+2025-11-25T03:17:30.620253 | FAIL | user:ch4rov(708208281) | Download Fail (Не удалось скачать файлы.)
+2025-11-25T03:17:30.620990 | FAIL | user:ch4rov(708208281) | Download Fail (Не удалось скачать файлы.)
+2025-11-25T03:17:45.250703 | USER_REQ | user:ch4rov(708208281) | <https://www.instagram.com/reel/DRSBP_ViBbF/?igsh=bnBtanU5aHJycDZl>
+2025-11-25T03:17:45.251743 | USER_REQ | user:ch4rov(708208281) | <https://www.instagram.com/reel/DRSBP_ViBbF/?igsh=bnBtanU5aHJycDZl>
+2025-11-25T03:17:48.305338 | FAIL | user:ch4rov(708208281) | Download Fail (Не удалось скачать файлы.)
+2025-11-25T03:17:48.305338 | FAIL | user:ch4rov(708208281) | Download Fail (Не удалось скачать файлы.)
+2025-11-25T03:20:25.530066 | USER_REQ | user:ch4rov(708208281) | <https://vm.tiktok.com/ZMAwhgC49/>
+2025-11-25T03:20:25.530301 | USER_REQ | user:ch4rov(708208281) | <<https://vm.tiktok.com/ZMAwhgC49/>>
+2025-11-25T03:20:33.138650 | SUCCESS | user:ch4rov(708208281) | Успешно (<https://vm.tiktok.com/ZMAwhgC49/>)
+2025-11-25T03:20:33.139117 | SUCCESS | user:ch4rov(708208281) | Успешно (<<https://vm.tiktok.com/ZMAwhgC49/>>)
+2025-11-25T03:23:50.512629 | SYSTEM |  | Система остановлена.
+2025-11-25T03:23:56.685004 | SYSTEM |  | Система запущена (Clean Start).
+2025-11-25T03:25:57.447685 | USER_REQ | user:ch4rov(708208281) | <https://youtube.com/shorts/_sn6sRuwwU4?si=2WtizZq30c5fCKFe>
+2025-11-25T03:25:57.448344 | USER_REQ | user:ch4rov(708208281) | <https://youtube.com/shorts/_sn6sRuwwU4?si=2WtizZq30c5fCKFe>
+2025-11-25T03:26:00.722911 | FAIL | user:ch4rov(708208281) | Download Fail (Не удалось скачать файлы.)
+2025-11-25T03:26:00.723911 | FAIL | user:ch4rov(708208281) | Download Fail (Не удалось скачать файлы.)
+2025-11-25T03:26:29.766846 | SYSTEM |  | Система остановлена.
+2025-11-25T03:26:35.471004 | SYSTEM |  | Система запущена (Clean Start).
+2025-11-25T03:26:45.655569 | USER_REQ | user:zabka9(8313125348) | <https://vm.tiktok.com/ZMAwhRdAn/>
+2025-11-25T03:26:45.655569 | USER_REQ | user:zabka9(8313125348) | <<https://vm.tiktok.com/ZMAwhRdAn/>>
+2025-11-25T03:26:49.213251 | FAIL | user:zabka9(8313125348) | Download Fail (Не удалось скачать файлы.)
+2025-11-25T03:26:49.214175 | FAIL | user:zabka9(8313125348) | Download Fail (Не удалось скачать файлы.)
+2025-11-25T03:27:14.882066 | USER_REQ | user:zabka9(8313125348) | <https://www.instagram.com/reel/DO8YQgpjM33/?igsh=MXczNXZtZmtvN2VkcA==>
+2025-11-25T03:27:14.883071 | USER_REQ | user:zabka9(8313125348) | <https://www.instagram.com/reel/DO8YQgpjM33/?igsh=MXczNXZtZmtvN2VkcA==>
+2025-11-25T03:27:21.571420 | SUCCESS | user:zabka9(8313125348) | Успешно (<https://www.instagram.com/reel/DO8YQgpjM33/?igsh=MXczNXZtZmtvN2VkcA==>)
+2025-11-25T03:27:21.572419 | SUCCESS | user:zabka9(8313125348) | Успешно (<https://www.instagram.com/reel/DO8YQgpjM33/?igsh=MXczNXZtZmtvN2VkcA==>)
+2025-11-25T03:29:26.690372 | SYSTEM |  | Система остановлена.
+2025-11-25T03:30:20.932537 | SYSTEM |  | Система запущена (Clean Start).
+2025-11-25T03:30:24.621160 | USER_REQ | user:zabka9(8313125348) | <https://vm.tiktok.com/ZMAwhRdAn/>
+2025-11-25T03:30:24.621160 | USER_REQ | user:zabka9(8313125348) | <<https://vm.tiktok.com/ZMAwhRdAn/>>
+2025-11-25T03:30:30.892275 | FAIL | user:zabka9(8313125348) | Download Fail (Не удалось скачать файлы.)
+2025-11-25T03:30:30.893311 | FAIL | user:zabka9(8313125348) | Download Fail (Не удалось скачать файлы.)
+2025-11-25T03:32:13.728783 | SYSTEM |  | Система остановлена.
+2025-11-25T03:32:18.581291 | SYSTEM |  | Система запущена (Clean Start).
+2025-11-25T03:32:38.008660 | USER_REQ | user:ch4rov(708208281) | <https://vm.tiktok.com/ZMAwhXDAj/>
+2025-11-25T03:32:38.009662 | USER_REQ | user:ch4rov(708208281) | <<https://vm.tiktok.com/ZMAwhXDAj/>>
+2025-11-25T03:34:25.538648 | USER_REQ | user:ch4rov(708208281) | <https://www.instagram.com/reel/DNQMnTAsR2k/?igsh=dzBranVrYWloM29i>
+2025-11-25T03:34:25.539650 | USER_REQ | user:ch4rov(708208281) | <https://www.instagram.com/reel/DNQMnTAsR2k/?igsh=dzBranVrYWloM29i>
+2025-11-25T03:35:44.993827 | USER_REQ | user:ch4rov(708208281) | <https://www.twitch.tv/ch4rov/clip/SmokyDirtyBobaResidentSleeper-geWW-E5kg0Tp-vs8?filter=clips&range=all&sort=time>
+2025-11-25T03:35:44.994829 | USER_REQ | user:ch4rov(708208281) | <https://www.twitch.tv/ch4rov/clip/SmokyDirtyBobaResidentSleeper-geWW-E5kg0Tp-vs8?filter=clips&range=all&sort=time>
+2025-11-25T03:35:50.545211 | SYSTEM |  | Система остановлена.
+2025-11-25T03:35:55.620156 | SYSTEM |  | Система запущена (Clean Start).
+2025-11-25T03:35:57.454024 | USER_REQ | user:ch4rov(708208281) | <https://www.twitch.tv/ch4rov/clip/SmokyDirtyBobaResidentSleeper-geWW-E5kg0Tp-vs8?filter=clips&range=all&sort=time>
+2025-11-25T03:35:57.455054 | USER_REQ | user:ch4rov(708208281) | <https://www.twitch.tv/ch4rov/clip/SmokyDirtyBobaResidentSleeper-geWW-E5kg0Tp-vs8?filter=clips&range=all&sort=time>
+2025-11-25T03:36:48.619047 | USER_REQ | user:ch4rov(708208281) | <https://soundcloud.com/ocqbbed9ek3i/yaryy-tolko-ne-begi?si=254dcae5aae141b8951a74c1c8134204&utm_source=clipboard&utm_medium=text&utm_campaign=social_sharing>
+2025-11-25T03:36:48.619283 | USER_REQ | user:ch4rov(708208281) | <https://soundcloud.com/ocqbbed9ek3i/yaryy-tolko-ne-begi?si=254dcae5aae141b8951a74c1c8134204&utm_source=clipboard&utm_medium=text&utm_campaign=social_sharing>
+2025-11-25T03:40:21.730653 | USER_REQ | user:ch4rov(708208281) | <https://vm.tiktok.com/ZMAwhPq1f/>
+2025-11-25T03:40:21.730831 | USER_REQ | user:ch4rov(708208281) | <<https://vm.tiktok.com/ZMAwhPq1f/>>
+2025-11-25T03:42:00.703615 | SYSTEM |  | Система остановлена.
+2025-11-25T03:42:08.521426 | SYSTEM |  | Система запущена (Clean Start).
+2025-11-25T03:42:23.776701 | USER_REQ | user:ch4rov(708208281) | <https://vm.tiktok.com/ZMAwhPq1f/>
+2025-11-25T03:42:23.777662 | USER_REQ | user:ch4rov(708208281) | <<https://vm.tiktok.com/ZMAwhPq1f/>>
+2025-11-25T03:42:29.822313 | FAIL | user:ch4rov(708208281) | Download Fail (Не удалось скачать файлы.)
+2025-11-25T03:42:29.823314 | FAIL | user:ch4rov(708208281) | Download Fail (Не удалось скачать файлы.)
+2025-11-25T03:42:39.202598 | USER_REQ | user:ch4rov(708208281) | <https://soundcloud.com/ocqbbed9ek3i/yaryy-tolko-ne-begi?si=254dcae5aae141b8951a74c1c8134204&utm_source=clipboard&utm_medium=text&utm_campaign=social_sharing>
+2025-11-25T03:42:39.203505 | USER_REQ | user:ch4rov(708208281) | <https://soundcloud.com/ocqbbed9ek3i/yaryy-tolko-ne-begi?si=254dcae5aae141b8951a74c1c8134204&utm_source=clipboard&utm_medium=text&utm_campaign=social_sharing>
+2025-11-25T03:42:45.099643 | SUCCESS | user:ch4rov(708208281) | Успешно (<https://soundcloud.com/ocqbbed9ek3i/yaryy-tolko-ne-begi?si=254dcae5aae141b8951a74c1c8134204&utm_source=clipboard&utm_medium=text&utm_campaign=social_sharing>)
+2025-11-25T03:42:45.100680 | SUCCESS | user:ch4rov(708208281) | Успешно (<https://soundcloud.com/ocqbbed9ek3i/yaryy-tolko-ne-begi?si=254dcae5aae141b8951a74c1c8134204&utm_source=clipboard&utm_medium=text&utm_campaign=social_sharing>)
+2025-11-25T03:42:52.595681 | SUCCESS | user:ch4rov(708208281) | [КЭШ] Успешно (<https://soundcloud.com/ocqbbed9ek3i/yaryy-tolko-ne-begi?si=254dcae5aae141b8951a74c1c8134204&utm_source=clipboard&utm_medium=text&utm_campaign=social_sharing>)
+2025-11-25T03:42:52.595681 | SUCCESS | user:ch4rov(708208281) | [КЭШ] Успешно (<https://soundcloud.com/ocqbbed9ek3i/yaryy-tolko-ne-begi?si=254dcae5aae141b8951a74c1c8134204&utm_source=clipboard&utm_medium=text&utm_campaign=social_sharing>)
+2025-11-25T03:51:17.439799 | SYSTEM |  | Система запущена (Clean Start).
+2025-11-25T03:51:47.707291 | SYSTEM |  | Система остановлена.
+2025-11-25T03:52:27.303957 | SYSTEM |  | Система запущена (Clean Start).
+2025-11-25T03:53:41.536024 | USER_REQ | user:ch4rov(708208281) | <https://vm.tiktok.com/ZMAwhPq1f/>
+2025-11-25T03:53:41.537023 | USER_REQ | user:ch4rov(708208281) | <<https://vm.tiktok.com/ZMAwhPq1f/>>
+2025-11-25T03:53:50.120088 | FAIL | user:ch4rov(708208281) | Download Fail (Не удалось скачать файлы.)
+2025-11-25T03:53:50.120088 | FAIL | user:ch4rov(708208281) | Download Fail (Не удалось скачать файлы.)
+2025-11-25T03:54:31.898775 | SYSTEM |  | Система остановлена.
+2025-11-25T03:54:59.100806 | SYSTEM |  | Система запущена (Clean Start).
+2025-11-25T03:55:19.185760 | SYSTEM |  | Система остановлена.
+2025-11-25T03:56:04.779997 | SYSTEM |  | Система запущена (Clean Start).
+2025-11-25T03:56:19.332663 | USER_REQ | user:ch4rov(708208281) | <https://soundcloud.com/ocqbbed9ek3i/yaryy-tolko-ne-begi?si=254dcae5aae141b8951a74c1c8134204&utm_source=clipboard&utm_medium=text&utm_campaign=social_sharing>
+2025-11-25T03:56:19.333662 | USER_REQ | user:ch4rov(708208281) | <https://soundcloud.com/ocqbbed9ek3i/yaryy-tolko-ne-begi?si=254dcae5aae141b8951a74c1c8134204&utm_source=clipboard&utm_medium=text&utm_campaign=social_sharing>
+2025-11-25T03:56:26.008607 | SUCCESS | user:ch4rov(708208281) | Успешно (<https://soundcloud.com/ocqbbed9ek3i/yaryy-tolko-ne-begi?si=254dcae5aae141b8951a74c1c8134204&utm_source=clipboard&utm_medium=text&utm_campaign=social_sharing>)
+2025-11-25T03:56:26.009588 | SUCCESS | user:ch4rov(708208281) | Успешно (<https://soundcloud.com/ocqbbed9ek3i/yaryy-tolko-ne-begi?si=254dcae5aae141b8951a74c1c8134204&utm_source=clipboard&utm_medium=text&utm_campaign=social_sharing>)
+2025-11-25T03:57:11.486437 | USER_REQ | user:ch4rov(708208281) | <https://www.instagram.com/reel/DRbyoFWCP0M/?igsh=YWx3emowNGI2a2Js>
+2025-11-25T03:57:11.487452 | USER_REQ | user:ch4rov(708208281) | <https://www.instagram.com/reel/DRbyoFWCP0M/?igsh=YWx3emowNGI2a2Js>
+2025-11-25T03:57:17.341971 | SUCCESS | user:ch4rov(708208281) | Успешно (<https://www.instagram.com/reel/DRbyoFWCP0M/?igsh=YWx3emowNGI2a2Js>)
+2025-11-25T03:57:17.342526 | SUCCESS | user:ch4rov(708208281) | Успешно (<https://www.instagram.com/reel/DRbyoFWCP0M/?igsh=YWx3emowNGI2a2Js>)
+2025-11-25T03:57:28.565950 | SUCCESS | user:ch4rov(708208281) | [КЭШ] Успешно (<https://www.instagram.com/reel/DRbyoFWCP0M/?igsh=YWx3emowNGI2a2Js>)
+2025-11-25T03:57:28.566924 | SUCCESS | user:ch4rov(708208281) | [КЭШ] Успешно (<https://www.instagram.com/reel/DRbyoFWCP0M/?igsh=YWx3emowNGI2a2Js>)
+2025-11-25T03:58:56.490845 | SYSTEM |  | Система остановлена.
+2025-11-25T03:59:01.210359 | SYSTEM |  | Система запущена (Clean Start).
+2025-11-25T03:59:04.327440 | USER_REQ | user:ch4rov(708208281) | <https://www.instagram.com/reel/DRbyoFWCP0M/?igsh=YWx3emowNGI2a2Js>
+2025-11-25T03:59:04.328404 | USER_REQ | user:ch4rov(708208281) | <https://www.instagram.com/reel/DRbyoFWCP0M/?igsh=YWx3emowNGI2a2Js>
+2025-11-25T03:59:10.510864 | SUCCESS | user:ch4rov(708208281) | Успешно (<https://www.instagram.com/reel/DRbyoFWCP0M/?igsh=YWx3emowNGI2a2Js>)
+2025-11-25T03:59:10.511777 | SUCCESS | user:ch4rov(708208281) | Успешно (<https://www.instagram.com/reel/DRbyoFWCP0M/?igsh=YWx3emowNGI2a2Js>)
+2025-11-25T04:00:35.157690 | SYSTEM |  | Система остановлена.
+2025-11-25T04:00:40.304802 | SYSTEM |  | Система запущена (Clean Start).
+2025-11-25T04:00:42.728617 | USER_REQ | user:ch4rov(708208281) | <https://www.instagram.com/reel/DRbyoFWCP0M/?igsh=YWx3emowNGI2a2Js>
+2025-11-25T04:00:42.729658 | USER_REQ | user:ch4rov(708208281) | <https://www.instagram.com/reel/DRbyoFWCP0M/?igsh=YWx3emowNGI2a2Js>
+2025-11-25T04:00:49.053002 | SUCCESS | user:ch4rov(708208281) | Успешно (<https://www.instagram.com/reel/DRbyoFWCP0M/?igsh=YWx3emowNGI2a2Js>)
+2025-11-25T04:00:49.054003 | SUCCESS | user:ch4rov(708208281) | Успешно (<https://www.instagram.com/reel/DRbyoFWCP0M/?igsh=YWx3emowNGI2a2Js>)
+2025-11-25T04:01:22.010926 | SYSTEM |  | Система остановлена.
+2025-11-25T04:01:47.541220 | SYSTEM |  | Система запущена (Clean Start).
+2025-11-25T04:01:49.685359 | USER_REQ | user:ch4rov(708208281) | <https://www.instagram.com/reel/DRbyoFWCP0M/?igsh=YWx3emowNGI2a2Js>
+2025-11-25T04:01:49.686359 | USER_REQ | user:ch4rov(708208281) | <https://www.instagram.com/reel/DRbyoFWCP0M/?igsh=YWx3emowNGI2a2Js>
+2025-11-25T04:01:55.741245 | SUCCESS | user:ch4rov(708208281) | Успешно (<https://www.instagram.com/reel/DRbyoFWCP0M/?igsh=YWx3emowNGI2a2Js>)
+2025-11-25T04:01:55.742171 | SUCCESS | user:ch4rov(708208281) | Успешно (<https://www.instagram.com/reel/DRbyoFWCP0M/?igsh=YWx3emowNGI2a2Js>)
+2025-11-25T04:03:35.812459 | SYSTEM |  | Система остановлена.
+2025-11-25T04:03:40.472257 | SYSTEM |  | Система запущена (Clean Start).
+2025-11-25T04:03:43.089196 | USER_REQ | user:ch4rov(708208281) | <https://www.instagram.com/reel/DRbyoFWCP0M/?igsh=YWx3emowNGI2a2Js>
+2025-11-25T04:03:49.223663 | SUCCESS | user:ch4rov(708208281) | Успешно (<https://www.instagram.com/reel/DRbyoFWCP0M/?igsh=YWx3emowNGI2a2Js>)
+2025-11-25T04:05:28.677782 | SYSTEM |  | Система остановлена.
+2025-11-25T04:06:27.972466 | SYSTEM |  | Система запущена (Clean Start).
+2025-11-25T04:06:50.266753 | USER_REQ | user:ch4rov(708208281) | <https://www.instagram.com/reel/DRbyoFWCP0M/?igsh=YWx3emowNGI2a2Js>
+2025-11-25T04:06:56.439879 | SUCCESS | user:ch4rov(708208281) | Успешно (<https://www.instagram.com/reel/DRbyoFWCP0M/?igsh=YWx3emowNGI2a2Js>)
+2025-11-25T04:10:49.542614 | USER_REQ | user:ch4rov(708208281) | <https://www.instagram.com/reel/DPcLo19CGLO/?igsh=YWhva3Rvb2MyenUz>
+2025-11-25T04:10:54.822617 | SUCCESS | user:ch4rov(708208281) | Успешно (<https://www.instagram.com/reel/DPcLo19CGLO/?igsh=YWhva3Rvb2MyenUz>)
+2025-11-25T04:11:26.132971 | SYSTEM |  | Система остановлена.
+2025-11-25T04:11:32.573011 | SYSTEM |  | Система запущена (Clean Start).
+2025-11-25T04:11:39.380340 | OTHER_MSG | user:ch4rov(708208281) | чмоооо
+2025-11-25T04:11:48.678855 | OTHER_MSG | user:ch4rov(708208281) | о норм
+2025-11-25T04:12:36.686785 | SYSTEM |  | Система остановлена.

@@ -12,6 +12,7 @@ LOGS_DIR = os.path.join(ROOT_DIR, "files")
 os.makedirs(LOGS_DIR, exist_ok=True)
 
 FULL_LOG_PATH = os.path.join(LOGS_DIR, "full_log.txt")
+OTHER_LOG_PATH = os.path.join(LOGS_DIR, "other_messages.txt")
 
 # Discord styles (copied from previous implementation)
 STYLES = {
@@ -31,6 +32,18 @@ async def _write_full_log(text: str):
     def _sync_write(t):
         try:
             with open(FULL_LOG_PATH, "a", encoding="utf-8") as f:
+                f.write(t + "\n")
+        except Exception:
+            pass
+
+    await asyncio.to_thread(_sync_write, text)
+
+
+async def _write_other_log(text: str):
+    """Append to the separate other-messages log file."""
+    def _sync_write(t):
+        try:
+            with open(OTHER_LOG_PATH, "a", encoding="utf-8") as f:
                 f.write(t + "\n")
         except Exception:
             pass
@@ -136,7 +149,7 @@ def _wrap_tiktok_urls(text: str) -> str:
 
 
 async def send_log(style_key: str, message: str, user=None, admin=None):
-    """Immediate send to Discord (admin/system) and also write local full log."""
+    """Immediate send to Discord (admin/system) and write local full log."""
     # Always write local full log
     await log_local(style_key, message, user=user, admin=admin)
 
@@ -202,5 +215,50 @@ async def send_log_groupable(style_key: str, message: str, user=None, admin=None
                     await _schedule_flush(state, user_id, username)
                     return
 
-    # Fallback: immediate send
-    await send_log(style_key, message_proc, user=user, admin=admin)
+    # Fallback: immediate send to Discord (local log already written above)
+    webhook_url = os.getenv("DISCORD_WEBHOOK_URL")
+    if not webhook_url:
+        return
+
+    ts = int(time.time())
+    time_tag = f"<t:{ts}:T>"
+    emoji = STYLES.get(style_key, "ℹ️")
+    tag_text = style_key if style_key != "NEW_USER" else "NEW USER"
+
+    actor_info = ""
+    if admin:
+        username = admin.username if admin.username else "NoUsername"
+        actor_info = f" • {username} (ID: {admin.id})"
+    elif user and style_key not in ["ADMIN", "SYSTEM"]:
+        username = user.username if user.username else "NoUsername"
+        actor_info = f" • {username} (ID: {user.id})"
+
+    if style_key == "SYSTEM":
+        content = f"{emoji} [`SYSTEM` {time_tag}] • {message_proc}"
+    elif style_key == "NEW_USER":
+        content = f"{emoji} [`NEW` {time_tag}] • {message_proc}"
+    elif style_key == "ADMIN":
+        content = f"{emoji} [`ADMIN` {time_tag}]{actor_info}: {message_proc}"
+    else:
+        content = f"{emoji} [`{tag_text}` {time_tag}]{actor_info}: {message_proc}"
+
+    await _post_webhook(content)
+
+
+async def log_other_message(message_text: str, user=None):
+    """Log messages that are not link-download related to a separate file.
+
+    This writes both to the existing full log (for audit) and to a
+    separate `other_messages.txt` file for quick inspection of ordinary
+    user messages (questions, short texts like "123", etc.).
+    """
+    try:
+        entry = _format_local_entry("OTHER_MSG", message_text, user=user)
+        # Write both logs concurrently (best-effort)
+        await asyncio.gather(
+            _write_full_log(entry),
+            _write_other_log(entry),
+        )
+    except Exception:
+        # swallow—logging must not crash bot
+        pass

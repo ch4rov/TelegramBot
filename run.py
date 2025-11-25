@@ -1,6 +1,10 @@
 import subprocess
 import sys
 import time
+import os
+
+# Устанавливаем UTF-8 кодировку для вывода
+os.environ['PYTHONIOENCODING'] = 'utf-8'
 
 # Имя файла твоего бота
 BOT_SCRIPT = "main.py"
@@ -14,8 +18,10 @@ def start_bot():
     while True:
         try:
             print(f"\n🚀 [RUNNER] Запуск {BOT_SCRIPT}...")
-            # Запускаем бота
-            process = subprocess.Popen([interpreter, BOT_SCRIPT])
+            # Запускаем бота с UTF-8 кодировкой
+            env = os.environ.copy()
+            env['PYTHONIOENCODING'] = 'utf-8'
+            process = subprocess.Popen([interpreter, BOT_SCRIPT], env=env)
             process.wait()  # Ждем завершения
 
             # Проверяем, как завершился бот

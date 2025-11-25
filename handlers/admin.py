@@ -1,10 +1,12 @@
 import os
 import sys
+import asyncio
 from aiogram import Router, types
 from aiogram.filters import Command
 from services.database import get_all_users, set_ban_status, get_user
 from logs.logger import send_log
 from aiogram import exceptions
+from services.downloads import download_content
 
 router = Router()
 ADMIN_ID = os.getenv("ADMIN_ID")
@@ -168,3 +170,43 @@ async def cmd_answer(message: types.Message):
     except exceptions.TelegramAPIError as e:
         await message.answer(f"❌ Не удалось отправить сообщение: {e}")
         await send_log("FAIL", f"Send Error to {target_id}: {e}", admin=message.from_user)
+
+
+# --- CHECK (тестирование скачивания со всех платформ) ---
+@router.message(Command("check"))
+async def cmd_check(message: types.Message):
+    if not is_admin(message.from_user.id):
+        return
+
+    test_urls = [
+        ("TikTok (Video)", "https://vm.tiktok.com/ZMAwhXDAj/"),
+        ("TikTok (Photo)", "https://vm.tiktok.com/ZMAwhPq1f/"),
+        ("Instagram (Reel)", "https://www.instagram.com/reel/DNQMnTAsR2k/?igsh=dzBranVrYWloM29i"),
+        ("YouTube (Video)", "https://youtu.be/dQw4w9WgXcQ"),
+        ("YouTube (Music)", "https://music.youtube.com/watch?v=dQw4w9WgXcQ"),
+        ("Twitch (Clip)", "https://www.twitch.tv/ch4rov/clip/SmokyDirtyBobaResidentSleeper-geWW-E5kg0Tp-vs8"),
+        ("SoundCloud", "https://soundcloud.com/ocqbbed9ek3i/yaryy-tolko-ne-begi"),
+    ]
+
+    await message.answer("🔍 Начинаю проверку скачивания со всех платформ...\n")
+
+    for idx, (platform_name, url) in enumerate(test_urls, 1):
+        # Имитируем, что админ отправляет ссылку как обычное сообщение
+        # Это позволит обработчику в users.py обработать её нормально
+        # и админу напишет ошибку в чат при тесте
+        
+        msg_status = await message.answer(f"⏳ Тест {idx}/{len(test_urls)}: {platform_name}\n📎 Отправляю: {url}")
+        
+        # Отправляем ссылку как отдельное сообщение (это вызовет обработчик в users.py)
+        await message.answer(url)
+        
+        # Даём время на обработку (загрузка, отправка файла)
+        await asyncio.sleep(3)
+        
+        # Обновляем статус
+        await msg_status.edit_text(f"✅ Тест {idx}/{len(test_urls)}: {platform_name} завершён")
+        
+        # Пауза перед следующей ссылкой
+        await asyncio.sleep(1)
+
+    await message.answer("✅ Проверка завершена.")

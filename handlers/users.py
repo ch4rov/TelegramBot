@@ -5,7 +5,7 @@ from aiogram.filters import CommandStart, Command
 from aiogram.types import FSInputFile, InputMediaPhoto, InputMediaVideo
 from aiogram.enums import ChatAction
 from services.database import add_or_update_user
-from logs.logger import send_log_groupable as send_log
+from logs.logger import send_log_groupable as send_log, log_other_message
 from services.downloads import download_content, is_valid_url
 from services.cache import get_cached_content, add_to_cache
 import messages as msg 
@@ -90,6 +90,21 @@ async def handle_link(message: types.Message):
             else: await message.answer(f"⚠️ Ошибка: {error}")
             
             await send_log("FAIL", f"Download Fail ({error})", user=user)
+            
+            # Отправляем подробную ошибку админу ТОЛЬКО если это был запрос администратора
+            admin_id = os.getenv("ADMIN_ID")
+            if admin_id and user.id == int(admin_id):
+                try:
+                    await message.bot.send_message(
+                        int(admin_id),
+                        f"❌ **Ошибка скачивания (тест)**\n\n"
+                        f"🔗 Ссылка: {url}\n"
+                        f"⚠️ Ошибка: `{error}`",
+                        parse_mode="Markdown"
+                    )
+                except Exception as e:
+                    print(f"Failed to send error to admin: {e}")
+            
             if user.id in ACTIVE_DOWNLOADS:
                 if ACTIVE_DOWNLOADS[user.id] > 0: ACTIVE_DOWNLOADS[user.id] -= 1
                 else: del ACTIVE_DOWNLOADS[user.id]
@@ -191,3 +206,30 @@ async def handle_link(message: types.Message):
                     ACTIVE_DOWNLOADS[user.id] -= 1
                 else:
                     del ACTIVE_DOWNLOADS[user.id]
+
+
+@router.message(F.text & ~F.text.contains("http"))
+async def handle_plain_text(message: types.Message):
+    """Handle plain text messages that are not link-download requests.
+
+    We don't change user-visible behavior here; just log the message
+    into a separate file for later inspection.
+    """
+    user = message.from_user
+    # Ignore if no text or it's a bot command
+    if not message.text:
+        return
+    txt = message.text.strip()
+    if not txt or txt.startswith("/"):
+        return
+
+    can, _ = await check_access_and_update(user, message)
+    if not can:
+        return
+
+    # Write to other messages log (and to full log as well)
+    try:
+        await log_other_message(txt, user=user)
+    except Exception as e:
+        # Logging failure should not interrupt bot
+        print(f"Failed to write other message log: {e}")
