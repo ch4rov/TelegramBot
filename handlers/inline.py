@@ -49,14 +49,26 @@ async def inline_query_handler(query: types.InlineQuery):
 
 @router.chosen_inline_result()
 async def chosen_handler(chosen_result: types.ChosenInlineResult):
-    # print(f"👀 Inline ID: {chosen_result.inline_message_id}")
-
+    """
+    User selected inline result.
+    Download content, send to PM, update inline with final media.
+    Only hourglass emoji shown during loading, then final file appears.
+    """
     url = chosen_result.query.strip()
     inline_msg_id = chosen_result.inline_message_id
     user_id = chosen_result.from_user.id 
     
     if not inline_msg_id:
         return
+
+    # Show loading indicator in inline (update caption to hourglass only)
+    try:
+        await bot.edit_message_caption(
+            inline_message_id=inline_msg_id,
+            caption="⏳",
+            reply_markup=None
+        )
+    except: pass
 
     files, folder_path, error = await download_content(url)
 
@@ -93,23 +105,19 @@ async def chosen_handler(chosen_result: types.ChosenInlineResult):
 
         telegram_file_id = None
         media_type = None 
-        sent_message_obj = None 
 
-        # --- ОТПРАВЛЯЕМ В ЛИЧКУ ---
+        # --- ОТПРАВЛЯЕМ В ЛИЧКУ (финальный файл, без временных) ---
         try:
             if ext in ['.mp4', '.mov', '.mkv', '.webm', '.ts']:
-                sent_message_obj = await bot.send_video(
+                msg = await bot.send_video(
                     chat_id=user_id,
                     video=media_object,
-                    # ВАЖНО: thumbnail=None для видео!
-                    # Это заставит телеграм взять кадр из самого видео (вертикальный),
-                    # а не квадратную картинку из инстаграма.
                     thumbnail=None, 
-                    caption=None, # Без текста
+                    caption=None,
                     supports_streaming=True,
                     disable_notification=True 
                 )
-                telegram_file_id = sent_message_obj.video.file_id
+                telegram_file_id = msg.video.file_id
                 media_type = 'video'
 
             elif ext in ['.mp3', '.m4a', '.ogg', '.wav']:
@@ -120,39 +128,40 @@ async def chosen_handler(chosen_result: types.ChosenInlineResult):
                     performer = parts[0]
                     title = parts[1]
 
-                sent_message_obj = await bot.send_audio(
+                msg = await bot.send_audio(
                     chat_id=user_id,
                     audio=media_object,
-                    # Для аудио обложка нужна, там квадрат это норма
                     thumbnail=thumbnail_object, 
                     caption=None,
                     performer=performer,
                     title=title,
                     disable_notification=True
                 )
-                telegram_file_id = sent_message_obj.audio.file_id
+                telegram_file_id = msg.audio.file_id
                 media_type = 'audio'
 
             elif ext in ['.jpg', '.jpeg', '.png']:
-                sent_message_obj = await bot.send_photo(
+                msg = await bot.send_photo(
                     chat_id=user_id,
                     photo=media_object,
                     caption=None,
                     disable_notification=True
                 )
-                telegram_file_id = sent_message_obj.photo[-1].file_id
+                telegram_file_id = msg.photo[-1].file_id
                 media_type = 'photo'
 
         except Exception as e_pm:
             print(f"❌ Ошибка отправки в ЛС: {e_pm}")
-            await bot.edit_message_caption(
-                inline_message_id=inline_msg_id,
-                caption="⚠️ Ошибка: Разблокируйте бота в ЛС (@ch4roff_bot).",
-                reply_markup=None
-            )
+            try:
+                await bot.edit_message_caption(
+                    inline_message_id=inline_msg_id,
+                    caption="⚠️ Ошибка: Разблокируйте бота в ЛС (@ch4roff_bot).",
+                    reply_markup=None
+                )
+            except: pass
             return
 
-        # --- ОБНОВЛЯЕМ ИНЛАЙН ---
+        # --- ОБНОВЛЯЕМ ИНЛАЙН на финальный файл ---
         if telegram_file_id:
             try:
                 new_media = None
@@ -169,7 +178,7 @@ async def chosen_handler(chosen_result: types.ChosenInlineResult):
                         caption=None
                     )
                 elif media_type == 'photo':
-                     new_media = InputMediaPhoto(
+                    new_media = InputMediaPhoto(
                         media=telegram_file_id,
                         caption=None
                     )
@@ -180,16 +189,6 @@ async def chosen_handler(chosen_result: types.ChosenInlineResult):
                         media=new_media,
                         reply_markup=None
                     )
-                    
-                    # Удаляем из ЛС
-                    if sent_message_obj:
-                        try:
-                            await asyncio.sleep(0.5) 
-                            await bot.delete_message(
-                                chat_id=user_id, 
-                                message_id=sent_message_obj.message_id
-                            )
-                        except: pass
                 
             except Exception as e_edit:
                 print(f"❌ Inline Edit Error: {e_edit}")
@@ -204,7 +203,7 @@ async def chosen_handler(chosen_result: types.ChosenInlineResult):
     except Exception as e:
         print(f"Global Inline Error: {e}")
         try:
-             await bot.edit_message_caption(
+            await bot.edit_message_caption(
                 inline_message_id=inline_msg_id,
                 caption="⚠️ Ошибка.",
                 reply_markup=None
