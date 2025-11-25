@@ -1,5 +1,7 @@
 import os
 import shutil
+import tempfile
+from uuid import uuid4
 from aiogram import Router, F, types
 from aiogram.filters import CommandStart, Command
 from aiogram.types import FSInputFile, InputMediaPhoto, InputMediaVideo
@@ -51,7 +53,15 @@ async def handle_link(message: types.Message):
     can, _ = await check_access_and_update(user, message)
     if not can: return
     
-    url = message.text.strip()
+    # Allow optional caption override using a pipe: "<url> | my caption"
+    url_raw = message.text.strip()
+    caption_override = None
+    if "|" in url_raw:
+        parts = url_raw.split("|", 1)
+        url = parts[0].strip()
+        caption_override = parts[1].strip()
+    else:
+        url = url_raw
     
     if not is_valid_url(url):
         await message.answer(msg.MSG_ERR_LINK)
@@ -81,7 +91,30 @@ async def handle_link(message: types.Message):
         await send_log("USER_REQ", f"<{url}>", user=user)
         
         await message.bot.send_chat_action(chat_id=message.chat.id, action=ChatAction.TYPING)
-        status_msg = await message.answer(msg.MSG_WAIT)
+
+        # Create a small placeholder file (~2KB) and send it, plus an hourglass
+        placeholder_msg = None
+        status_msg = None
+        try:
+            tmp_name = f"placeholder_{uuid4().hex}.bin"
+            tmp_path = os.path.join(tempfile.gettempdir(), tmp_name)
+            # write ~2KB of zeros
+            with open(tmp_path, "wb") as tf:
+                tf.write(b"\0" * 2048)
+
+            try:
+                placeholder_msg = await message.answer_document(FSInputFile(tmp_path), caption=msg.MSG_WAIT)
+            except Exception:
+                placeholder_msg = None
+
+            try:
+                status_msg = await message.answer(msg.MSG_WAIT)
+            except Exception:
+                status_msg = None
+
+        except Exception:
+            placeholder_msg = None
+            status_msg = await message.answer(msg.MSG_WAIT)
 
         files, folder_path, error = await download_content(url)
 
@@ -113,7 +146,8 @@ async def handle_link(message: types.Message):
     # --- ОТПРАВКА ---
     try:
         if status_msg:
-            await status_msg.delete()
+            # keep status message until we finish sending; we'll delete it afterwards
+            pass
 
         media_files = []
         thumb_file = None
@@ -132,6 +166,25 @@ async def handle_link(message: types.Message):
         if not media_files:
             raise Exception("Файлы не найдены.")
 
+        # If this is a TikTok and we only got image files (photo carousel),
+        # inform the user that carousels are not supported yet.
+        is_tiktok = "tiktok" in url.lower()
+        image_exts = ['.jpg', '.jpeg', '.png', '.webp']
+        media_image_only = len(media_files) > 0 and all(os.path.splitext(f)[1].lower() in image_exts for f in media_files)
+        if is_tiktok and media_image_only:
+            await send_log("INFO", f"TikTok carousel not supported: <{url}>", user=user)
+            try:
+                if status_msg:
+                    await status_msg.edit_text(msg.MSG_TIKTOK_CAROUSEL_NOT_SUPPORTED)
+                else:
+                    await message.answer(msg.MSG_TIKTOK_CAROUSEL_NOT_SUPPORTED)
+            except Exception:
+                pass
+            # cleanup downloaded files
+            if not from_cache and folder_path and os.path.exists(folder_path):
+                shutil.rmtree(folder_path, ignore_errors=True)
+            return
+
         filename_full = os.path.basename(media_files[0])
         filename_no_ext = os.path.splitext(filename_full)[0]
         first_ext = os.path.splitext(media_files[0])[1].lower()
@@ -147,9 +200,10 @@ async def handle_link(message: types.Message):
                 performer = parts[0]
                 title = parts[1]
             
+            caption_text = caption_override or msg.MSG_CAPTION
             await message.answer_audio(
                 FSInputFile(media_files[0]), 
-                caption=msg.MSG_CAPTION, 
+                caption=caption_text, 
                 thumbnail=FSInputFile(thumb_file) if thumb_file else None,
                 performer=performer,
                 title=title
@@ -160,9 +214,10 @@ async def handle_link(message: types.Message):
             await message.bot.send_chat_action(chat_id=message.chat.id, action=ChatAction.UPLOAD_VIDEO)
             clean_caption = f"{filename_no_ext}\n{msg.MSG_CAPTION}"
             
+            caption_text = caption_override or clean_caption
             await message.answer_video(
                 FSInputFile(media_files[0]), 
-                caption=clean_caption, 
+                caption=caption_text, 
                 thumbnail=FSInputFile(thumb_file) if thumb_file else None, 
                 supports_streaming=True
             )
@@ -179,11 +234,11 @@ async def handle_link(message: types.Message):
                 elif f_ext in ['.mp4', '.mov', '.mkv']:
                     media_group.append(InputMediaVideo(media=input_file))
             if media_group:
-                media_group[0].caption = msg.MSG_CAPTION
+                media_group[0].caption = caption_override or msg.MSG_CAPTION
                 await message.answer_media_group(media_group)
-
         else:
-             await message.answer_photo(FSInputFile(media_files[0]), caption=msg.MSG_CAPTION)
+            caption_text = caption_override or msg.MSG_CAPTION
+            await message.answer_photo(FSInputFile(media_files[0]), caption=caption_text)
 
         # ЛОГИ: Добавляем [КЭШ] и скобки < >
         prefix = "[КЭШ] " if from_cache else ""
@@ -192,7 +247,23 @@ async def handle_link(message: types.Message):
         # Сохранение в кэш (если новая загрузка)
         if not from_cache and folder_path:
             await add_to_cache(url, folder_path, files)
-        
+        # Delete placeholder + status messages after successful send
+        try:
+            if placeholder_msg:
+                await message.bot.delete_message(chat_id=message.chat.id, message_id=placeholder_msg.message_id)
+        except Exception:
+            pass
+        try:
+            if status_msg:
+                await message.bot.delete_message(chat_id=message.chat.id, message_id=status_msg.message_id)
+        except Exception:
+            pass
+        # remove temp file if exists
+        try:
+            if 'tmp_path' in locals() and os.path.exists(tmp_path):
+                os.remove(tmp_path)
+        except Exception:
+            pass
     except Exception as e:
         await message.answer(msg.MSG_ERR_SEND)
         await send_log("FAIL", f"Send Error: {e}", user=user)

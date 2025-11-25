@@ -7,7 +7,7 @@ import time
 from loader import bot, dp
 from services.database import init_db
 from logs.logger import send_log
-from handlers import users, admin
+from handlers import users, admin, inline
 from aiogram import types
 from aiogram.dispatcher.middlewares.base import BaseMiddleware
 import settings  # Импортируем настройки
@@ -95,6 +95,7 @@ async def main():
     # 4. Роутеры
     dp.include_router(admin.router)
     dp.include_router(users.router)
+    dp.include_router(inline.router)
 
     print("🚀 Бот запущен (через Scheduler)!")
     await send_log("SYSTEM", "Система запущена (Clean Start).")

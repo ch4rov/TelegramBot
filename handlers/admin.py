@@ -6,6 +6,7 @@ from aiogram.filters import Command
 from services.database import get_all_users, set_ban_status, get_user
 from logs.logger import send_log
 from aiogram import exceptions
+from aiogram.types import FSInputFile
 from services.downloads import download_content
 
 router = Router()
@@ -171,6 +172,36 @@ async def cmd_answer(message: types.Message):
         await message.answer(f"❌ Не удалось отправить сообщение: {e}")
         await send_log("FAIL", f"Send Error to {target_id}: {e}", admin=message.from_user)
 
+@router.message(Command("get_placeholder"))
+async def cmd_get_placeholder(message: types.Message):
+    if not is_admin(message.from_user.id): return
+    
+    # Укажи здесь точное имя твоего файла в корне!
+    file_path = "placeholder.mp4" 
+
+    if not os.path.exists(file_path):
+        await message.answer(f"❌ Файл `{file_path}` не найден в папке бота.")
+        return
+
+    wait_msg = await message.answer("📤 Загружаю заглушку на сервера Telegram...")
+
+    try:
+        # Отправляем видео, чтобы получить его ID
+        video = FSInputFile(file_path)
+        sent_message = await message.answer_video(video, caption="Вот твоя заглушка")
+        
+        # Получаем ID
+        file_id = sent_message.video.file_id
+        
+        await wait_msg.delete()
+        await message.answer(
+            f"✅ **File ID получен!**\n\n"
+            f"Скопируй строку ниже и вставь в `handlers/inline.py`:\n\n"
+            f"`{file_id}`",
+            parse_mode="Markdown"
+        )
+    except Exception as e:
+        await message.answer(f"Ошибка: {e}")
 
 # --- CHECK (тестирование скачивания со всех платформ) ---
 @router.message(Command("check"))
