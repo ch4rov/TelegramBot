@@ -3,7 +3,8 @@ import sys
 from aiogram import Router, types
 from aiogram.filters import Command
 from services.database import get_all_users, set_ban_status, get_user
-from services.logger import send_log
+from logs.logger import send_log
+from aiogram import exceptions
 
 router = Router()
 ADMIN_ID = os.getenv("ADMIN_ID")
@@ -124,3 +125,46 @@ async def cmd_unban(message: types.Message):
             await message.bot.send_message(target_id, "✅ Ваш аккаунт разблокирован.")
         except: pass
     except: pass
+
+
+# --- ANSWER (admin -> user) ---
+@router.message(Command("answer"))
+async def cmd_answer(message: types.Message):
+    if not is_admin(message.from_user.id):
+        return
+
+    # If the admin replied to a user's message, use that user id.
+    rest = message.text.partition(' ')[2].strip()
+    target_id = None
+    text_to_send = None
+
+    if message.reply_to_message and getattr(message.reply_to_message, 'from_user', None):
+        if not rest:
+            await message.answer("⚠️ Использование: ответ при цитате: `/answer ТЕКСТ`", parse_mode="Markdown")
+            return
+        target_id = message.reply_to_message.from_user.id
+        text_to_send = rest
+    else:
+        parts = message.text.split(maxsplit=2)
+        if len(parts) < 3:
+            await message.answer("⚠️ Использование: `/answer ID ТЕКСТ`", parse_mode="Markdown")
+            return
+        try:
+            target_id = int(parts[1])
+        except ValueError:
+            await message.answer("ID должен быть числом.")
+            return
+        text_to_send = parts[2]
+
+    if not text_to_send or not target_id:
+        return
+
+    # Send the message as admin (prefix to indicate admin)
+    send_text = f"📩 Сообщение от администратора:\n\n{text_to_send}"
+    try:
+        await message.bot.send_message(target_id, send_text)
+        await message.answer("✅ Сообщение отправлено.")
+        await send_log("ADMIN", f"Отправил сообщение {target_id}: {text_to_send}", admin=message.from_user)
+    except exceptions.TelegramAPIError as e:
+        await message.answer(f"❌ Не удалось отправить сообщение: {e}")
+        await send_log("FAIL", f"Send Error to {target_id}: {e}", admin=message.from_user)

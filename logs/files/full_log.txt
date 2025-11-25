@@ -1,0 +1,9 @@
+2025-11-25T03:12:45.625589 | SYSTEM |  | Система запущена (Clean Start).
+2025-11-25T03:13:28.263212 | USER_REQ | user:spamtest(1234567) | https://www.tiktok.com/@user/video/12345
+2025-11-25T03:13:28.266392 | USER_REQ | user:spamtest(1234567) | <https://www.tiktok.com/@user/video/12345>
+2025-11-25T03:13:28.430806 | USER_REQ | user:spamtest(1234567) | https://www.tiktok.com/@user/video/12345
+2025-11-25T03:13:28.431833 | USER_REQ | user:spamtest(1234567) | <https://www.tiktok.com/@user/video/12345>
+2025-11-25T03:13:28.585475 | USER_REQ | user:spamtest(1234567) | https://www.tiktok.com/@user/video/12345
+2025-11-25T03:13:28.737451 | USER_REQ | user:spamtest(1234567) | https://www.tiktok.com/@user/video/12345
+2025-11-25T03:13:28.907651 | USER_REQ | user:spamtest(1234567) | https://www.tiktok.com/@user/video/12345
+2025-11-25T03:13:29.059925 | USER_REQ | user:spamtest(1234567) | https://www.tiktok.com/@user/video/12345
