@@ -49,7 +49,7 @@ async def inline_query_handler(query: types.InlineQuery):
 
 @router.chosen_inline_result()
 async def chosen_handler(chosen_result: types.ChosenInlineResult):
-    print(f"👀 Inline ID: {chosen_result.inline_message_id}")
+    # print(f"👀 Inline ID: {chosen_result.inline_message_id}")
 
     url = chosen_result.query.strip()
     inline_msg_id = chosen_result.inline_message_id
@@ -58,7 +58,6 @@ async def chosen_handler(chosen_result: types.ChosenInlineResult):
     if not inline_msg_id:
         return
 
-    # 1. Скачиваем файл на диск
     files, folder_path, error = await download_content(url)
 
     if error:
@@ -72,7 +71,6 @@ async def chosen_handler(chosen_result: types.ChosenInlineResult):
         return
 
     try:
-        # Фильтрация
         media_files = []
         thumb_file = None
         
@@ -90,31 +88,30 @@ async def chosen_handler(chosen_result: types.ChosenInlineResult):
         ext = os.path.splitext(target_file)[1].lower()
         filename = os.path.basename(target_file)
         
-        # Объекты для отправки в ЛС
         media_object = FSInputFile(target_file, filename=filename)
         thumbnail_object = FSInputFile(thumb_file) if thumb_file else None
 
-        # Переменные для полученного File ID
         telegram_file_id = None
-        media_type = None # 'video', 'audio', 'photo'
+        media_type = None 
+        sent_message_obj = None 
 
-        # 2. ОТПРАВЛЯЕМ В ЛИЧКУ (ЧТОБЫ ПОЛУЧИТЬ ID)
+        # --- ОТПРАВЛЯЕМ В ЛИЧКУ ---
         try:
-            sent_msg = None
-            
-            # --- ВИДЕО ---
             if ext in ['.mp4', '.mov', '.mkv', '.webm', '.ts']:
-                sent_msg = await bot.send_video(
+                sent_message_obj = await bot.send_video(
                     chat_id=user_id,
                     video=media_object,
-                    thumbnail=thumbnail_object,
-                    caption="@ch4roff_bot",
-                    supports_streaming=True
+                    # ВАЖНО: thumbnail=None для видео!
+                    # Это заставит телеграм взять кадр из самого видео (вертикальный),
+                    # а не квадратную картинку из инстаграма.
+                    thumbnail=None, 
+                    caption=None, # Без текста
+                    supports_streaming=True,
+                    disable_notification=True 
                 )
-                telegram_file_id = sent_msg.video.file_id
+                telegram_file_id = sent_message_obj.video.file_id
                 media_type = 'video'
 
-            # --- АУДИО ---
             elif ext in ['.mp3', '.m4a', '.ogg', '.wav']:
                 performer = "Unknown"
                 title = os.path.splitext(filename)[0]
@@ -123,79 +120,83 @@ async def chosen_handler(chosen_result: types.ChosenInlineResult):
                     performer = parts[0]
                     title = parts[1]
 
-                sent_msg = await bot.send_audio(
+                sent_message_obj = await bot.send_audio(
                     chat_id=user_id,
                     audio=media_object,
-                    thumbnail=thumbnail_object,
-                    caption="@ch4roff_bot",
+                    # Для аудио обложка нужна, там квадрат это норма
+                    thumbnail=thumbnail_object, 
+                    caption=None,
                     performer=performer,
-                    title=title
+                    title=title,
+                    disable_notification=True
                 )
-                telegram_file_id = sent_msg.audio.file_id
+                telegram_file_id = sent_message_obj.audio.file_id
                 media_type = 'audio'
 
-            # --- ФОТО ---
             elif ext in ['.jpg', '.jpeg', '.png']:
-                sent_msg = await bot.send_photo(
+                sent_message_obj = await bot.send_photo(
                     chat_id=user_id,
                     photo=media_object,
-                    caption="@ch4roff_bot"
+                    caption=None,
+                    disable_notification=True
                 )
-                # У фото берем самое большое качество (последнее в списке)
-                telegram_file_id = sent_msg.photo[-1].file_id
+                telegram_file_id = sent_message_obj.photo[-1].file_id
                 media_type = 'photo'
 
         except Exception as e_pm:
             print(f"❌ Ошибка отправки в ЛС: {e_pm}")
-            # Если юзер заблокировал бота, мы не получим ID. Пишем ошибку.
             await bot.edit_message_caption(
                 inline_message_id=inline_msg_id,
-                caption="⚠️ Ошибка: Запустите бота в личных сообщениях (@ch4roff_bot), чтобы скачивание работало.",
+                caption="⚠️ Ошибка: Разблокируйте бота в ЛС (@ch4roff_bot).",
                 reply_markup=None
             )
             return
 
-        # 3. ОБНОВЛЯЕМ ИНЛАЙН (ИСПОЛЬЗУЯ FILE ID)
+        # --- ОБНОВЛЯЕМ ИНЛАЙН ---
         if telegram_file_id:
             try:
                 new_media = None
                 
                 if media_type == 'video':
                     new_media = InputMediaVideo(
-                        media=telegram_file_id, # <--- ID вместо файла
-                        caption="@ch4roff_bot",
+                        media=telegram_file_id,
+                        caption=None,
                         supports_streaming=True
                     )
                 elif media_type == 'audio':
-                    # Внимание: смена Video -> Audio в инлайне работает не везде,
-                    # но мы хотя бы попытаемся.
                     new_media = InputMediaAudio(
                         media=telegram_file_id,
-                        caption="@ch4roff_bot"
+                        caption=None
                     )
                 elif media_type == 'photo':
                      new_media = InputMediaPhoto(
                         media=telegram_file_id,
-                        caption="@ch4roff_bot"
+                        caption=None
                     )
 
                 if new_media:
                     await bot.edit_message_media(
                         inline_message_id=inline_msg_id,
                         media=new_media,
-                        reply_markup=None # Убираем кнопку
+                        reply_markup=None
                     )
-                    print("✅ Inline Edit Success (via File ID)")
+                    
+                    # Удаляем из ЛС
+                    if sent_message_obj:
+                        try:
+                            await asyncio.sleep(0.5) 
+                            await bot.delete_message(
+                                chat_id=user_id, 
+                                message_id=sent_message_obj.message_id
+                            )
+                        except: pass
                 
             except Exception as e_edit:
                 print(f"❌ Inline Edit Error: {e_edit}")
-                # Если не получилось изменить (например, Тип не совпал),
-                # то ничего страшного - файл уже у пользователя в личке!
-                # Просто обновим заглушку.
                 try:
                     await bot.edit_message_caption(
                         inline_message_id=inline_msg_id,
-                        caption="✅ Файл загружен в личные сообщения.",
+                        caption="✅ Файл загружен в ЛС.",
                         reply_markup=None
                     )
                 except: pass
@@ -205,7 +206,7 @@ async def chosen_handler(chosen_result: types.ChosenInlineResult):
         try:
              await bot.edit_message_caption(
                 inline_message_id=inline_msg_id,
-                caption="⚠️ Ошибка обработки.",
+                caption="⚠️ Ошибка.",
                 reply_markup=None
             )
         except: pass
