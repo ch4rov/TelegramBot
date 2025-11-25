@@ -1,3 +1,4 @@
+"""Inline handler - processes inline queries"""
 import os
 import shutil
 import uuid
@@ -68,7 +69,8 @@ async def chosen_handler(chosen_result: types.ChosenInlineResult):
             caption="⏳",
             reply_markup=None
         )
-    except: pass
+    except:
+        pass
 
     files, folder_path, error = await download_content(url)
 
@@ -79,7 +81,8 @@ async def chosen_handler(chosen_result: types.ChosenInlineResult):
                 caption=f"❌ Ошибка: {error}",
                 reply_markup=None
             )
-        except: pass
+        except:
+            pass
         return
 
     try:
@@ -106,7 +109,7 @@ async def chosen_handler(chosen_result: types.ChosenInlineResult):
         telegram_file_id = None
         media_type = None 
 
-        # --- ОТПРАВЛЯЕМ В ЛИЧКУ (финальный файл, без временных) ---
+        # --- SEND TO PM (final file only, no temp messages) ---
         try:
             if ext in ['.mp4', '.mov', '.mkv', '.webm', '.ts']:
                 msg = await bot.send_video(
@@ -158,10 +161,11 @@ async def chosen_handler(chosen_result: types.ChosenInlineResult):
                     caption="⚠️ Ошибка: Разблокируйте бота в ЛС (@ch4roff_bot).",
                     reply_markup=None
                 )
-            except: pass
+            except:
+                pass
             return
 
-        # --- ОБНОВЛЯЕМ ИНЛАЙН на финальный файл ---
+        # --- UPDATE INLINE with final media ---
         if telegram_file_id:
             try:
                 new_media = None
@@ -198,7 +202,8 @@ async def chosen_handler(chosen_result: types.ChosenInlineResult):
                         caption="✅ Файл загружен в ЛС.",
                         reply_markup=None
                     )
-                except: pass
+                except:
+                    pass
 
     except Exception as e:
         print(f"Global Inline Error: {e}")
@@ -208,7 +213,8 @@ async def chosen_handler(chosen_result: types.ChosenInlineResult):
                 caption="⚠️ Ошибка.",
                 reply_markup=None
             )
-        except: pass
+        except:
+            pass
 
     finally:
         if folder_path and os.path.exists(folder_path):
