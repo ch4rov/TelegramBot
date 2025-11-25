@@ -19,14 +19,14 @@ async def cmd_restart(message: types.Message):
     await message.answer("♻️ Перезагрузка системы...")
     await send_log("ADMIN", "Инициировал перезагрузку системы (Restart)", admin=message.from_user)
     
-    # Завершаем процесс Python. Наш run.py увидит это и запустит его заново.
-    sys.exit(0)
+    # Завершаем процесс кодом 65. run.py поймает его и перезапустит бота.
+    sys.exit(65)
 
 # --- STATUS / USERS ---
 @router.message(Command("status"))
 async def cmd_status(message: types.Message):
     if not is_admin(message.from_user.id): return
-    await message.answer("✅ Система работает штатно (v2.0 Running).")
+    await message.answer("✅ Система работает штатно (v2.1 Album Support).")
     await send_log("ADMIN", "> /status", admin=message.from_user)
 
 @router.message(Command("users"))
@@ -67,9 +67,8 @@ async def cmd_ban(message: types.Message):
         # 1. Получаем инфу о юзере из БД
         user_data = await get_user(target_id)
         
-        # Если юзера нет в базе вообще
         if not user_data:
-            await message.answer("❌ Пользователь не найден в базе данных (он еще не запускал бота).")
+            await message.answer("❌ Пользователь не найден в базе данных.")
             return
 
         is_already_banned = user_data['is_banned']
@@ -77,31 +76,26 @@ async def cmd_ban(message: types.Message):
 
         # 2. Логика проверки
         if is_already_banned:
-            # Если причина та же самая -> Ошибка
             if old_reason == new_reason:
                 await message.answer(f"⚠️ Пользователь `{target_id}` уже забанен по этой причине.")
                 return
             else:
-                # Если причина другая -> Обновляем
                 await set_ban_status(target_id, True, new_reason)
                 await message.answer(f"🔄 Причина бана для `{target_id}` обновлена на: {new_reason}")
                 await send_log("ADMIN", f"Обновил причину бана для {target_id} на: {new_reason}", admin=message.from_user)
                 return
 
-        # 3. Бан (если не был забанен)
+        # 3. Бан
         await set_ban_status(target_id, True, new_reason)
-        
         await message.answer(f"⛔ Пользователь `{target_id}` забанен.\nПричина: {new_reason}", parse_mode="Markdown")
         
-        # Красивый лог без двойных пробелов
         log_msg = f"Забанил {target_id} (Причина: {new_reason})"
         await send_log("ADMIN", log_msg, admin=message.from_user)
         
-        # Уведомление юзеру
         try:
             await message.bot.send_message(target_id, f"⛔ Вы были заблокированы администратором.\nПричина: {new_reason}\nСвязь: @ch4rov")
         except:
-            pass # Юзер заблочил бота
+            pass 
 
     except ValueError:
         await message.answer("ID должен быть числом.")
