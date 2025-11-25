@@ -1,45 +1,37 @@
 from . import tiktok, instagram, youtube, soundcloud, twitch
 import re
+import settings
 
-# Строгая проверка доменов через регулярные выражения
-# ^ - начало строки, https? - http или https, (www\.)? - с www или без
-URL_PATTERNS = [
-    r'^https?://(www\.|vm\.|vt\.|m\.)?tiktok\.com/.*',
-    r'^https?://(www\.|m\.)?instagram\.com/.*',
-    r'^https?://(www\.|m\.|music\.)?youtube\.com/.*',
-    r'^https?://(www\.)?youtu\.be/.*',
-    r'^https?://(www\.|m\.)?soundcloud\.com/.*',
-    r'^https?://(www\.|m\.|clips\.)?twitch\.tv/.*'
-]
+SAFE_CHARS = r'[a-zA-Z0-9\-\_\.\/\?\=\&\%]+'
 
 def is_valid_url(url: str) -> bool:
-    for pattern in URL_PATTERNS:
+    if re.search(r'[;$\`"\'\{\}\[\]\|\^]', url):
+        return False
+    for pattern in settings.URL_PATTERNS:
         if re.match(pattern, url):
             return True
     return False
 
-async def download_content(url: str):
-    """
-    Главная функция-роутер.
-    """
+# --- ВАЖНО: Добавили custom_opts=None ---
+async def download_content(url: str, custom_opts: dict = None):
     if not is_valid_url(url):
-        return None, None, "Ссылка не поддерживается или домен запрещен ⛔"
+        return None, None, "Ссылка не поддерживается или запрещена ⛔"
 
-    # Роутинг
+    # Передаем custom_opts во все модули
     if "tiktok.com" in url:
-        return await tiktok.download(url)
+        return await tiktok.download(url, custom_opts)
         
     elif "instagram.com" in url:
-        return await instagram.download(url)
+        return await instagram.download(url, custom_opts)
         
     elif "youtube.com" in url or "youtu.be" in url:
-        return await youtube.download(url)
+        return await youtube.download(url, custom_opts)
         
     elif "soundcloud.com" in url:
-        return await soundcloud.download(url)
+        return await soundcloud.download(url, custom_opts)
     
     elif "twitch.tv" in url:
-        return await twitch.download(url)
+        return await twitch.download(url, custom_opts)
 
     else:
         return None, None, "Неизвестный сервис."
