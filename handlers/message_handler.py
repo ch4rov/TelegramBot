@@ -8,7 +8,6 @@ from aiogram.filters import CommandStart, Command
 from aiogram.types import FSInputFile, InputMediaPhoto, InputMediaVideo, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.enums import ChatAction
 
-# Импорты сервисов
 from services.database_service import add_or_update_user, get_cached_file, save_cached_file, set_lastfm_username
 from logs.logger import send_log_groupable as send_log, log_other_message
 from services.downloads import download_content, is_valid_url
@@ -22,22 +21,16 @@ router = Router()
 ACTIVE_DOWNLOADS = {}
 ADMIN_ID = os.getenv("ADMIN_ID")
 
-# --- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ (ОБЪЯВЛЯЕМ В НАЧАЛЕ) ---
-
 async def check_access_and_update(user, message: types.Message):
-    """Проверка прав и обновление статистики юзера"""
     is_new, is_banned, ban_reason = await add_or_update_user(user.id, user.username)
-    
     if is_banned:
         reason_text = f"\nПричина: {ban_reason}" if ban_reason else ""
         text = f"⛔ Вы заблокированы.{reason_text}\nСвязь с админом: @ch4rov"
         await message.answer(text)
         return False, False
-        
     return True, is_new
 
 def make_caption(title_text, url, override=None):
-    """Формирует HTML подпись с кликабельным названием"""
     bot_link = "@ch4roff_bot"
     if override:
         safe_override = html.escape(override)
@@ -47,13 +40,10 @@ def make_caption(title_text, url, override=None):
     safe_title = html.escape(title_text)
     return f'<a href="{url}">{safe_title}</a>\n\n{bot_link}'
 
-# --- КОМАНДЫ ---
-
 @router.message(Command("menu"))
 async def cmd_menu(message: types.Message):
     can, _ = await check_access_and_update(message.from_user, message)
     if not can: return
-    
     text = msg.MSG_MENU_HEADER + msg.MSG_MENU_USER
     if str(message.from_user.id) == str(ADMIN_ID):
         text += msg.MSG_MENU_ADMIN
@@ -61,56 +51,26 @@ async def cmd_menu(message: types.Message):
 
 @router.message(Command("login"))
 async def cmd_login(message: types.Message):
-    """Привязка аккаунта Last.fm"""
-    # Сначала регистрируем юзера, чтобы было кого обновлять
     can, _ = await check_access_and_update(message.from_user, message)
     if not can: return
-
     parts = message.text.split()
     if len(parts) < 2:
-        await message.answer(
-            "🔑 <b>Авторизация Last.fm</b>\n\n"
-            "Укажите ваш никнейм:\n"
-            "<code>/login ваш_ник</code>",
-            parse_mode="HTML"
-        )
+        await message.answer("🔑 <b>Авторизация Last.fm</b>\nУкажите ник:\n<code>/login ваш_ник</code>", parse_mode="HTML")
         return
-
     lfm_username = parts[1]
-    # Сохраняем в базу
     await set_lastfm_username(message.from_user.id, lfm_username)
-    
-    await message.answer(
-        f"✅ Профиль <b>{lfm_username}</b> привязан!\n\n"
-        f"Попробуйте инлайн: <code>@ch4roff_bot</code>",
-        parse_mode="HTML"
-    )
+    await message.answer(f"✅ Профиль <b>{lfm_username}</b> привязан!", parse_mode="HTML")
 
 @router.message(CommandStart())
 async def cmd_start(message: types.Message):
     can, is_new = await check_access_and_update(message.from_user, message)
     if not can: return
-    
     await message.answer(msg.MSG_START)
-    
     if is_new:
-        log_text = f"Новый пользователь: {message.from_user.username} (ID: {message.from_user.id})"
-        await send_log("NEW_USER", log_text, user=message.from_user)
-        
+        await send_log("NEW_USER", f"New: {message.from_user.full_name} (ID: {message.from_user.id})", user=message.from_user)
         if ADMIN_ID:
-            try:
-                clean_name = message.from_user.full_name
-                username = f"@{message.from_user.username}" if message.from_user.username else "без юзернейма"
-                await message.bot.send_message(
-                    ADMIN_ID,
-                    f"🔔 **Новый пользователь!**\n"
-                    f"👤 {clean_name} ({username})\n"
-                    f"🆔 `{message.from_user.id}`",
-                    parse_mode="Markdown"
-                )
+            try: await message.bot.send_message(ADMIN_ID, f"🔔 New User: {message.from_user.full_name}")
             except: pass
-
-# --- ОБРАБОТКА ССЫЛОК ---
 
 @router.message(F.text.contains("http"))
 async def handle_link(message: types.Message):
@@ -125,11 +85,9 @@ async def handle_link(message: types.Message):
         url_raw = parts[0].strip()
         caption_override = parts[1].strip()
     
-    # Чистка
     for bad_char in [';', '\n', ' ', '$', '`', '|']: 
         if bad_char in url_raw: url_raw = url_raw.split(bad_char)[0]
 
-    # Нормализация
     url = clean_url(url_raw)
 
     if not is_valid_url(url):
@@ -139,7 +97,6 @@ async def handle_link(message: types.Message):
 
     # 1. SMART CACHE
     db_cache = await get_cached_file(url)
-    
     if db_cache:
         file_id = db_cache['file_id']
         media_type = db_cache['media_type']
@@ -178,7 +135,7 @@ async def handle_link(message: types.Message):
             with open(tmp_path, "wb") as tf: tf.write(b"\0" * 2048)
             try: placeholder_msg = await message.answer_document(FSInputFile(tmp_path), caption="⏳ Очередь...")
             except: pass
-            try: status_msg = await message.answer("📥 Скачивание с сервера...")
+            try: status_msg = await message.answer("⏳")
             except: pass
         except: 
             try: status_msg = await message.answer("⏳")
@@ -191,23 +148,13 @@ async def handle_link(message: types.Message):
             else: await message.answer(f"⚠️ {error}")
             
             await send_log("FAIL", f"Fail: {error}", user=user)
-            
-            if ADMIN_ID and str(user.id) == str(ADMIN_ID):
-                try: await message.bot.send_message(ADMIN_ID, f"❌ Error:\n{url}\n{error}")
-                except: pass
-
             if user.id in ACTIVE_DOWNLOADS:
                 if ACTIVE_DOWNLOADS[user.id] > 0: ACTIVE_DOWNLOADS[user.id] -= 1
                 else: del ACTIVE_DOWNLOADS[user.id]
-            
             if tmp_path and os.path.exists(tmp_path):
                 try: os.remove(tmp_path)
                 except: pass
             return
-
-        if status_msg:
-            try: await status_msg.edit_text("⚙️ Обработка и отправка...")
-            except: pass
 
     # 3. ОТПРАВКА
     try:
@@ -216,6 +163,7 @@ async def handle_link(message: types.Message):
         
         for f in files:
             ext = os.path.splitext(f)[1].lower()
+            # Ищем обложку
             if ext in ['.jpg', '.jpeg', '.png', '.webp']: thumb_file = f
             elif ext in ['.mp4', '.mov', '.mkv', '.webm', '.ts', '.mp3', '.m4a', '.ogg', '.wav']: media_files.append(f)
 
@@ -228,7 +176,6 @@ async def handle_link(message: types.Message):
 
         if not media_files: raise Exception("Files not found")
 
-        # Приоритет видео
         has_video = any(os.path.splitext(f)[1].lower() in video_exts for f in media_files)
         if has_video:
             media_files = [f for f in media_files if os.path.splitext(f)[1].lower() in video_exts]
@@ -239,21 +186,20 @@ async def handle_link(message: types.Message):
 
         sent_msg = None
         media_type_str = None
-        
         caption_html = make_caption(filename_no_ext, url, caption_override)
 
         # АУДИО
         if len(media_files) == 1 and first_ext in ['.mp3', '.m4a', '.ogg', '.wav']:
             await message.bot.send_chat_action(chat_id=message.chat.id, action=ChatAction.UPLOAD_VOICE)
-            performer, title = "Unknown", filename_no_ext
+            performer = "@ch4roff_bot"
+            title = filename_no_ext
             if " - " in filename_no_ext:
                 parts = filename_no_ext.split(" - ", 1)
                 performer, title = parts[0], parts[1]
             
             sent_msg = await message.answer_audio(
                 FSInputFile(media_files[0]), 
-                caption=caption_html,
-                parse_mode="HTML",
+                caption=caption_html, parse_mode="HTML",
                 thumbnail=FSInputFile(thumb_file) if thumb_file else None,
                 performer=performer, title=title
             )
@@ -262,11 +208,9 @@ async def handle_link(message: types.Message):
         # ВИДЕО
         elif len(media_files) == 1 and first_ext in video_exts:
             await message.bot.send_chat_action(chat_id=message.chat.id, action=ChatAction.UPLOAD_VIDEO)
-            
             sent_msg = await message.answer_video(
                 FSInputFile(media_files[0]), 
-                caption=caption_html, 
-                parse_mode="HTML",
+                caption=caption_html, parse_mode="HTML",
                 thumbnail=None, 
                 supports_streaming=True
             )
@@ -300,9 +244,7 @@ async def handle_link(message: types.Message):
             if media_type_str == "video" and sent_msg.video: fid = sent_msg.video.file_id
             elif media_type_str == "audio" and sent_msg.audio: fid = sent_msg.audio.file_id
             elif media_type_str == "photo" and sent_msg.photo: fid = sent_msg.photo[-1].file_id
-            
-            if fid:
-                await save_cached_file(url, fid, media_type_str, title=filename_no_ext)
+            if fid: await save_cached_file(url, fid, media_type_str, title=filename_no_ext)
 
         if not from_cache and folder_path:
             await add_to_cache(url, folder_path, files)
@@ -327,27 +269,21 @@ async def handle_link(message: types.Message):
                 if ACTIVE_DOWNLOADS[user.id] > 0: ACTIVE_DOWNLOADS[user.id] -= 1
                 else: del ACTIVE_DOWNLOADS[user.id]
 
-# --- ПОИСК МУЗЫКИ (ЕСЛИ ТЕКСТ) ---
-
 @router.message(F.text & ~F.text.contains("http"))
 async def handle_plain_text(message: types.Message):
     user = message.from_user
     if not message.text: return
     txt = message.text.strip()
     if not txt or txt.startswith("/"): return
-
     can, _ = await check_access_and_update(user, message)
     if not can: return
-
     try: await log_other_message(txt, user=user)
     except: pass
 
-    # Поиск
     await message.bot.send_chat_action(chat_id=message.chat.id, action=ChatAction.TYPING)
     results = await search_youtube(txt, limit=5)
-    
     if not results:
-        await message.answer(f"🔍 Ничего не найдено по запросу: {txt}")
+        await message.answer(f"🔍 Ничего не найдено: {txt}")
         return
 
     buttons = []
@@ -357,9 +293,4 @@ async def handle_plain_text(message: types.Message):
         buttons.append([InlineKeyboardButton(text=full_title, callback_data=f"music:{res['id']}")])
     
     buttons.append([InlineKeyboardButton(text="❌ Закрыть", callback_data="delete_msg")])
-    
-    await message.answer(
-        f"🔎 <b>Результаты поиска:</b>\n<code>{txt}</code>", 
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
-        parse_mode="HTML"
-    )
+    await message.answer(f"🔎 <b>Поиск:</b>\n<code>{txt}</code>", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons), parse_mode="HTML")

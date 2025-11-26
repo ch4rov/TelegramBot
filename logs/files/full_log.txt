@@ -95,3 +95,70 @@
 2025-11-25T23:47:29.377424 | SYSTEM |  | Система запущена (Clean Start).
 2025-11-25T23:48:13.147269 | OTHER_MSG | user:ch4rov(708208281) | 123
 2025-11-25T23:50:26.581057 | OTHER_MSG | user:ch4rov(708208281) | Never gonna give you up
+2025-11-25T23:55:06.761929 | SYSTEM |  | Система остановлена.
+2025-11-25T23:56:58.971259 | SYSTEM |  | Система запущена (Clean Start).
+2025-11-25T23:57:11.044879 | OTHER_MSG | user:ch4rov(708208281) | never gonna give you up
+2025-11-26T00:03:01.986146 | SYSTEM |  | Система остановлена.
+2025-11-26T00:03:07.887797 | SYSTEM |  | Система запущена (Clean Start).
+2025-11-26T00:04:11.335410 | OTHER_MSG | user:ch4rov(708208281) | Астра - демоны
+2025-11-26T00:05:33.127899 | SYSTEM |  | Система остановлена.
+2025-11-26T00:07:38.510354 | SYSTEM |  | Система запущена (Clean Start).
+2025-11-26T00:07:55.013633 | OTHER_MSG | user:ch4rov(708208281) | Астра - демоны
+2025-11-26T00:08:31.669841 | USER_REQ | user:ch4rov(708208281) | <https://youtu.be/yT2SfJB9VyY>
+2025-11-26T00:09:13.966839 | ADMIN | admin:ch4rov(708208281) | > /status
+2025-11-26T00:09:15.638208 | SUCCESS | user:ch4rov(708208281) | Успешно (<https://youtu.be/yT2SfJB9VyY>)
+2025-11-26T00:10:11.153884 | USER_REQ | user:ch4rov(708208281) | <https://youtu.be/v97jN41iD5k>
+2025-11-26T00:10:27.365733 | SUCCESS | user:ch4rov(708208281) | Успешно (<https://youtu.be/v97jN41iD5k>)
+2025-11-26T00:11:48.070730 | SYSTEM |  | Система остановлена.
+2025-11-26T00:11:53.856019 | SYSTEM |  | Система запущена (Clean Start).
+2025-11-26T00:14:50.841870 | SYSTEM |  | Система остановлена.
+2025-11-26T00:14:56.778887 | SYSTEM |  | Система запущена (Clean Start).
+2025-11-26T00:18:28.536654 | SYSTEM |  | Система остановлена.
+2025-11-26T00:20:02.815191 | SYSTEM |  | Система запущена (Clean Start).
+2025-11-26T00:22:12.322921 | SYSTEM |  | Система остановлена.
+2025-11-26T00:22:28.654423 | SYSTEM |  | Система запущена (Clean Start).
+2025-11-26T00:27:46.644905 | SYSTEM |  | Система остановлена.
+2025-11-26T00:27:53.059201 | SYSTEM |  | Система запущена (Clean Start).
+2025-11-26T00:28:30.499710 | YT-DLP-ERROR | URL:https://www.tiktok.com/@isaisaevaralina3003/video/7560057658624019735?is_from_webapp=1&sender_device=pc | FFmpegVideoConvertorPP.__init__() got an unexpected keyword argument 'options'
+2025-11-26T00:28:38.110837 | USER_REQ | user:ch4rov(708208281) | <https://www.tiktok.com/@isaisaevaralina3003/video/7560057658624019735>
+2025-11-26T00:28:38.576662 | YT-DLP-ERROR | URL:https://www.tiktok.com/@isaisaevaralina3003/video/7560057658624019735 | FFmpegVideoConvertorPP.__init__() got an unexpected keyword argument 'options'
+2025-11-26T00:28:39.634934 | FAIL | user:ch4rov(708208281) | Fail: Не удалось скачать файлы.
+2025-11-26T00:28:47.705872 | USER_REQ | user:ch4rov(708208281) | <https://www.tiktok.com/@antoniogta5rp/video/7571148955707280696>
+2025-11-26T00:28:48.194130 | YT-DLP-ERROR | URL:https://www.tiktok.com/@antoniogta5rp/video/7571148955707280696 | FFmpegVideoConvertorPP.__init__() got an unexpected keyword argument 'options'
+2025-11-26T00:28:49.253792 | FAIL | user:ch4rov(708208281) | Fail: Не удалось скачать файлы.
+2025-11-26T00:30:17.714195 | USER_REQ | user:ch4rov(708208281) | <https://www.instagram.com/reel/DQyynEMinzX>
+2025-11-26T00:32:14.918444 | SYSTEM |  | Система остановлена.
+2025-11-26T00:32:20.941946 | SYSTEM |  | Система запущена (Clean Start).
+2025-11-26T00:32:27.149318 | USER_REQ | user:ch4rov(708208281) | <https://www.instagram.com/reel/DQyynEMinzX>
+2025-11-26T00:32:31.151107 | SUCCESS | user:ch4rov(708208281) | Успешно (<https://www.instagram.com/reel/DQyynEMinzX>)
+2025-11-26T00:32:39.901711 | USER_REQ | user:ch4rov(708208281) | <https://www.tiktok.com/@isaisaevaralina3003/video/7560057658624019735>
+2025-11-26T00:32:45.279462 | SUCCESS | user:ch4rov(708208281) | Успешно (<https://www.tiktok.com/@isaisaevaralina3003/video/7560057658624019735>)
+2025-11-26T00:34:25.138575 | USER_REQ | user:ch4rov(708208281) | <https://www.twitch.tv/ch4rov/clip/SmokyDirtyBobaResidentSleeper-geWW-E5kg0Tp-vs8>
+2025-11-26T00:34:32.857027 | SUCCESS | user:ch4rov(708208281) | Успешно (<https://www.twitch.tv/ch4rov/clip/SmokyDirtyBobaResidentSleeper-geWW-E5kg0Tp-vs8>)
+2025-11-26T00:34:37.243370 | USER_REQ | user:ch4rov(708208281) | <https://soundcloud.com/user-289448566/gulyayu-rassvety-vstrechayu?si=6ccc4810dd434ee3beceaaac64938249&utm_source=clipboard&utm_medium=text&utm_campaign=social_sharing>
+2025-11-26T00:36:13.573212 | SYSTEM |  | Система остановлена.
+2025-11-26T00:36:19.410177 | SYSTEM |  | Система запущена (Clean Start).
+2025-11-26T00:37:01.968532 | OTHER_MSG | user:ch4rov(708208281) | never gonna give you up
+2025-11-26T00:37:49.982708 | OTHER_MSG | user:ch4rov(708208281) | never gonna give you up
+2025-11-26T00:38:07.704090 | USER_REQ | user:ch4rov(708208281) | <https://www.tiktok.com/@the_inxi/video/7575566608962260236>
+2025-11-26T00:38:11.549462 | SUCCESS | user:ch4rov(708208281) | Успешно (<https://www.tiktok.com/@the_inxi/video/7575566608962260236>)
+2025-11-26T00:39:10.352533 | USER_REQ | user:ch4rov(708208281) | <https://soundcloud.com/bratishka682/davajte-zhenshhinam-pizdy?si=0d90044e4ac644fab2e49953f93611f9&utm_source=clipboard&utm_medium=text&utm_campaign=social_sharing>
+2025-11-26T00:39:17.040713 | SUCCESS | user:ch4rov(708208281) | Успешно (<https://soundcloud.com/bratishka682/davajte-zhenshhinam-pizdy?si=0d90044e4ac644fab2e49953f93611f9&utm_source=clipboard&utm_medium=text&utm_campaign=social_sharing>)
+2025-11-26T00:49:40.760139 | SYSTEM |  | Система остановлена.
+2025-11-26T00:49:46.644081 | SYSTEM |  | Система запущена (Clean Start).
+2025-11-26T00:50:11.553553 | OTHER_MSG | user:ch4rov(708208281) | астра демоны
+2025-11-26T00:50:17.650400 | OTHER_MSG | user:ch4rov(708208281) | never gonna give up
+2025-11-26T01:01:38.383393 | SYSTEM |  | Система остановлена.
+2025-11-26T01:02:05.433406 | SYSTEM |  | Система запущена (Clean Start).
+2025-11-26T01:02:11.803997 | OTHER_MSG | user:ch4rov(708208281) | астра демоны
+2025-11-26T01:04:38.773826 | SYSTEM |  | Система остановлена.
+2025-11-26T01:04:47.682995 | SYSTEM |  | Система запущена (Clean Start).
+2025-11-26T01:04:49.625485 | OTHER_MSG | user:ch4rov(708208281) | астра демоны
+2025-11-26T01:06:32.582230 | SYSTEM |  | Система остановлена.
+2025-11-26T01:06:40.587003 | SYSTEM |  | Система запущена (Clean Start).
+2025-11-26T01:06:42.601171 | OTHER_MSG | user:ch4rov(708208281) | астра демоны
+2025-11-26T01:07:17.794662 | SYSTEM |  | Система запущена (Clean Start).
+2025-11-26T01:07:21.882639 | OTHER_MSG | user:ch4rov(708208281) | астра демоны
+2025-11-26T01:08:53.432588 | SYSTEM |  | Система остановлена.
+2025-11-26T01:09:04.027250 | SYSTEM |  | Система запущена (Clean Start).
+2025-11-26T01:09:08.697998 | OTHER_MSG | user:ch4rov(708208281) | астра демоны

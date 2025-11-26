@@ -1,60 +1,72 @@
 import asyncio
-import yt_dlp
-
-async def _run_search(query: str, engine_prefix: str):
-    ydl_opts = {
-        'format': 'bestaudio/best',
-        'noplaylist': True,
-        'quiet': True,
-        'extract_flat': True,
-        'default_search': engine_prefix,
-        'ignoreerrors': True,
-    }
-
-    def _search():
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            try:
-                info = ydl.extract_info(query, download=False)
-                # Добавлена проверка на None
-                if not info: 
-                    return []
-                if 'entries' in info:
-                    return info['entries']
-                return []
-            except Exception as e:
-                print(f"Search Error ({engine_prefix}): {e}")
-                return []
-
-    loop = asyncio.get_event_loop()
-    raw_results = await loop.run_in_executor(None, _search)
-    
-    # Если вернулся None (критическая ошибка), делаем пустой список
-    if raw_results is None: 
-        raw_results = []
-    
-    clean_results = []
-    for item in raw_results:
-        if not item: continue
-        
-        if item.get('url'): link = item['url']
-        else: link = f"https://youtu.be/{item.get('id')}"
-            
-        clean_results.append({
-            'id': item.get('id'),
-            'url': link,
-            'title': item.get('title', 'Unknown'),
-            'uploader': item.get('uploader', 'Unknown'),
-            'duration': item.get('duration_string', '?:??')
-        })
-    
-    return clean_results
+import traceback # Чтобы видеть полный текст ошибки
+from youtubesearchpython import VideosSearch
 
 async def search_music(query: str, limit: int = 5):
-    results = await _run_search(query, f'ytsearch{limit}')
-    if not results:
-        print(f"🔍 YouTube пуст, ищу на SoundCloud: {query}")
-        results = await _run_search(query, f'scsearch{limit}')
-    return results
+    """
+    Поиск с ГЛУБОКИМ ЛОГИРОВАНИЕМ.
+    """
+    print(f"\n🔍 [DEBUG] Запрос на поиск: '{query}' | Лимит: {limit}")
 
-async def search_youtube(query: str, limit: int = 5):
-    return await _run_search(query, f'ytsearch{limit}')
+    def _sync_search():
+        try:
+            print(f"   --> [DEBUG] Запускаем VideosSearch('{query}')...")
+            search = VideosSearch(query, limit=limit)
+            
+            print(f"   --> [DEBUG] Выполняем .result()...")
+            res = search.result()
+            
+            # Логируем тип и размер
+            if res:
+                count = len(res.get('result', []))
+                print(f"   --> [DEBUG] Получен ответ. Найдено элементов: {count}")
+            else:
+                print(f"   --> [DEBUG] Ответ пустой (None или пустой словарь).")
+            
+            return res
+            
+        except Exception as e:
+            print(f"❌ [DEBUG] ОШИБКА ВНУТРИ _sync_search:")
+            print(traceback.format_exc()) # Полный лог ошибки
+            return None
+
+    loop = asyncio.get_event_loop()
+    
+    print(f"🔄 [DEBUG] Передача в executor...")
+    raw_data = await loop.run_in_executor(None, _sync_search)
+    
+    clean_results = []
+    
+    if raw_data and 'result' in raw_data:
+        print(f"⚙️ [DEBUG] Начинаю обработку {len(raw_data['result'])} элементов...")
+        
+        for i, item in enumerate(raw_data['result']):
+            try:
+                title = item.get('title', 'Unknown')
+                link = item.get('link', None)
+                vid_id = item.get('id', None)
+                
+                print(f"   [{i}] Found: {title} | ID: {vid_id}")
+                
+                if not link or not vid_id:
+                    print(f"   ⚠️ [DEBUG] Пропуск элемента (нет ссылки или ID)")
+                    continue
+
+                clean_results.append({
+                    'source': 'YT',
+                    'id': vid_id,
+                    'url': link,
+                    'title': title,
+                    'duration': item.get('duration') or "Live",
+                    'uploader': item['channel']['name']
+                })
+            except Exception as parse_err:
+                print(f"   ⚠️ [DEBUG] Ошибка парсинга элемента {i}: {parse_err}")
+    else:
+        print(f"⚠️ [DEBUG] 'result' ключ отсутствует в ответе API.")
+
+    print(f"✅ [DEBUG] Итог: возвращаем {len(clean_results)} результатов.\n")
+    return clean_results
+
+# Алиас
+search_youtube = search_music
