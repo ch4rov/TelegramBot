@@ -27,7 +27,12 @@ async def init_db():
                 title TEXT
             )
         """)
-        # Миграции
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS system_config (
+                key TEXT PRIMARY KEY,
+                value TEXT
+            )
+        """)
         try: await db.execute("ALTER TABLE users ADD COLUMN lastfm_username TEXT DEFAULT NULL")
         except: pass
         try: await db.execute("ALTER TABLE file_cache ADD COLUMN title TEXT DEFAULT NULL")
@@ -105,4 +110,30 @@ async def save_cached_file(url, file_id, media_type, title=None):
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     async with aiosqlite.connect(DB_NAME) as db:
         await db.execute("INSERT OR REPLACE INTO file_cache (url, file_id, media_type, created_at, title) VALUES (?, ?, ?, ?, ?)", (url, file_id, media_type, now, title))
+        await db.commit()
+
+async def save_user_cookie(user_id, cookie_content):
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    async with aiosqlite.connect(DB_NAME) as db:
+        await db.execute(
+            "INSERT OR REPLACE INTO user_cookies (user_id, cookie_data, updated_at) VALUES (?, ?, ?)",
+            (user_id, cookie_content, now)
+        )
+        await db.commit()
+
+async def get_user_cookie(user_id):
+    async with aiosqlite.connect(DB_NAME) as db:
+        cursor = await db.execute("SELECT cookie_data FROM user_cookies WHERE user_id = ?", (user_id,))
+        row = await cursor.fetchone()
+        return row[0] if row else None
+    
+async def get_system_value(key):
+    async with aiosqlite.connect(DB_NAME) as db:
+        cursor = await db.execute("SELECT value FROM system_config WHERE key = ?", (key,))
+        row = await cursor.fetchone()
+        return row[0] if row else None
+
+async def set_system_value(key, value):
+    async with aiosqlite.connect(DB_NAME) as db:
+        await db.execute("INSERT OR REPLACE INTO system_config (key, value) VALUES (?, ?)", (key, value))
         await db.commit()
