@@ -12,12 +12,13 @@ from aiogram.types import BotCommand, BotCommandScopeDefault, BotCommandScopeCha
 from aiogram.dispatcher.middlewares.base import BaseMiddleware
 import settings 
 
-# --- ИМПОРТЫ ХЕНДЛЕРОВ ---
+# --- ИМПОРТЫ ---
 from handlers import message_handler, admin_handler, inline_handler, search_handler
-# --- ИМПОРТ ЗАЩИТЫ ---
 from middlewares import AccessMiddleware
-# --- УСТАНОВЩИК ---
 from core.installs.ffmpeg_installer import check_and_install_ffmpeg 
+# Импорт функции обновления заглушек
+from services.placeholder_service import ensure_placeholders
+# ---------------
 
 logging.getLogger('aiogram').setLevel(logging.WARNING)
 logging.getLogger('aiohttp').setLevel(logging.WARNING)
@@ -54,32 +55,21 @@ def clean_downloads_on_startup():
         os.makedirs(settings.DOWNLOADS_DIR)
 
 async def set_ui_commands(bot):
-    """
-    Автоматически обновляет кнопку Menu в Telegram.
-    1. Для всех: только пользовательские команды.
-    2. Для Админа: ВСЕ команды (включая бан, чек, статус).
-    """
+    """Автоматически обновляет кнопку Menu в Telegram."""
     user_commands = []
     admin_commands = []
 
-    # Сортируем команды из settings.py
     for cmd, desc, cat, copy in settings.BOT_COMMANDS_LIST:
         command = BotCommand(command=cmd, description=desc)
         
-        # Пользовательские команды идут всем
         if cat == "user":
             user_commands.append(command)
-            admin_commands.append(command) # Админу они тоже нужны
-        
-        # Админские команды (модерация и техника) - только в список админа
+            admin_commands.append(command)
         elif cat.startswith("admin"):
             admin_commands.append(command)
     
-    # 1. Устанавливаем меню для всех (Default Scope)
     await bot.set_my_commands(user_commands, scope=BotCommandScopeDefault())
     
-    # 2. Устанавливаем расширенное меню лично для Админа (Private Chat Scope)
-    # Берем ID из переменных окружения, так как settings может еще не подгрузить его
     admin_id = os.getenv("ADMIN_ID")
     if admin_id:
         try:
@@ -94,7 +84,7 @@ async def set_ui_commands(bot):
     print("✅ [UI] Общее меню обновлено")
 
 async def main():
-    # 1. Получение имени бота (для кэша)
+    # 1. Получение имени бота
     try:
         bot_info = await bot.get_me()
         settings.BOT_USERNAME = bot_info.username
@@ -103,7 +93,7 @@ async def main():
         print(f"❌ Ошибка авторизации бота: {e}")
         return
 
-    # 2. Установка компонентов
+    # 2. Подготовка системы
     check_and_install_ffmpeg()
     clean_downloads_on_startup()
     await init_db()
@@ -124,9 +114,9 @@ async def main():
     dp.include_router(inline_handler.router)
     dp.include_router(message_handler.router)
 
-    # 6. Обновление меню (UI)
-    # Вызываем ПОСЛЕ старта, чтобы API точно было доступно
+    # 6. Обновление UI и Заглушек
     await set_ui_commands(bot)
+    await ensure_placeholders()
 
     print("🚀 Бот запущен!")
     await send_log("SYSTEM", f"Система запущена ({'TEST' if settings.IS_TEST_ENV else 'STABLE'}).")

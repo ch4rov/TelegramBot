@@ -16,9 +16,9 @@ from aiogram.types import (
     InlineKeyboardButton
 )
 from loader import bot
-# --- ИСПРАВЛЕНО: Теперь берем из platform_manager ---
 from services.platforms.platform_manager import download_content, is_valid_url 
-# ----------------------------------------------------
+from services.placeholder_service import get_placeholder 
+
 from services.database_service import get_user
 from services.lastfm_service import get_user_recent_track
 from services.search_service import search_music
@@ -26,30 +26,42 @@ import settings
 
 router = Router()
 
-# ID ЗАГЛУШЕК
-PLACEHOLDER_VIDEO_ID = "BAACAgIAAxkBAAE-Ud9pJTv8aMQwTbYs7hN5zHqb9Epz6AACE34AAraNMUnM0M23YCUF0DYE" 
-PLACEHOLDER_AUDIO_ID = "CQACAgIAAxkDAAIFcWkmO4LEqQIgMGeMrRlkJ7fLKQVxAAKRgQAC2IoxSbFgB6UvfGcbNgQ"
-
 @router.inline_query()
 async def inline_query_handler(query: types.InlineQuery):
     text = query.query.strip()
     user_id = query.from_user.id
     results = []
 
-    # --- ПОЛУЧАЕМ ID ЗАГЛУШЕК ---
-    # Мы не можем использовать get_placeholder() здесь, так как оно асинхронное
-    # Но мы будем использовать старые File ID как заглушки для упрощения.
-    video_ph = PLACEHOLDER_VIDEO_ID
-    audio_ph = PLACEHOLDER_AUDIO_ID
+    # --- 1. ПОЛУЧАЕМ ID ЗАГЛУШЕК ---
+    video_ph = await get_placeholder('video')
+    audio_ph = await get_placeholder('audio')
 
-    # 1. ССЫЛКА -> ВИДЕО ПЛЕЙСХОЛДЕР
+    # --- ДИАГНОСТИКА (Если молчит - смотри сюда в консоль) ---
+    if not video_ph or not audio_ph:
+        print(f"❌ [INLINE ERROR] Нет ID заглушек! Video: {video_ph}, Audio: {audio_ph}")
+        print("   👉 Проверь TECH_CHAT_ID в .env")
+        print("   👉 Проверь, есть ли ffmpeg.exe в core/installs")
+        print("   👉 Проверь, админ ли бот в тех. чате")
+        
+        # Отправляем заглушку с ошибкой, чтобы ты увидел это в Телеграме
+        results.append(InlineQueryResultArticle(
+            id="error",
+            title="⚠️ Ошибка системы",
+            description="Плейсхолдеры не сгенерированы. Проверь консоль.",
+            input_message_content=InputTextMessageContent(message_text="System Error: Placeholders missing.")
+        ))
+        await query.answer(results, cache_time=0, is_personal=True)
+        return
+    # ---------------------------------------------------------
+
+    # 2. ССЫЛКА -> ВИДЕО ПЛЕЙСХОЛДЕР
     if text and is_valid_url(text):
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="📥 Скачать", callback_data="processing")]
         ])
         results.append(InlineQueryResultCachedVideo(
             id=str(uuid.uuid4()),
-            video_file_id=video_ph,
+            video_file_id=video_ph, 
             title="📥 Скачать по ссылке",
             description="Нажмите для загрузки",
             caption="⏳ *Загрузка...*",
@@ -57,7 +69,7 @@ async def inline_query_handler(query: types.InlineQuery):
             reply_markup=keyboard
         ))
 
-    # 2. МУЗЫКА -> АУДИО ПЛЕЙСХОЛДЕР
+    # 3. МУЗЫКА -> АУДИО ПЛЕЙСХОЛДЕР
     else:
         search_query = text
         if not search_query:
@@ -80,7 +92,6 @@ async def inline_query_handler(query: types.InlineQuery):
                 reply_markup=keyboard
             ))
         else:
-            # Подсказка логина
             results.append(InlineQueryResultArticle(
                 id="login_hint",
                 title="🔗 Подключить Last.fm",
@@ -104,7 +115,6 @@ async def chosen_handler(chosen_result: types.ChosenInlineResult):
     is_music = result_id.startswith("music:")
     url = None
     
-    # --- 1. ПОЛУЧАЕМ ССЫЛКУ ---
     if is_music:
         query = result_id.split(":", 1)[1]
         res = await search_music(query, limit=1)
@@ -120,7 +130,6 @@ async def chosen_handler(chosen_result: types.ChosenInlineResult):
 
     if not url: return
 
-    # --- 2. СКАЧИВАНИЕ ---
     custom_opts = {}
     if is_music:
         custom_opts = {
@@ -157,19 +166,15 @@ async def chosen_handler(chosen_result: types.ChosenInlineResult):
         is_audio = ext in ['.mp3', '.m4a', '.ogg', '.wav']
         
         clean_title = str(filename_no_ext).replace("&", "&amp;").replace("<", "&lt;")
-        caption_text = f'<a href="{url}">{clean_title}</a>'
+        
+        bot_name = f"@{settings.BOT_USERNAME}" if settings.BOT_USERNAME else "@ch4roff_bot"
+        caption_text = f'<a href="{url}">{clean_title}</a>\n\n{bot_name}'
 
         telegram_file_id, media_type, sent_msg = None, None, None
 
-# 3. ОТПРАВКА В ЛС
         try:
-            # Берем имя из настроек
-            current_bot_name = f"@{settings.BOT_USERNAME}" if settings.BOT_USERNAME else "@ch4roff_bot"
-
             if is_audio:
-                current_bot_name = f"@{settings.BOT_USERNAME}" if settings.BOT_USERNAME else "@ch4roff_bot"
-                performer = current_bot_name
-                title = filename_no_ext
+                performer, title = bot_name, filename_no_ext
                 if " - " in filename_no_ext: parts = filename_no_ext.split(" - ", 1); performer, title = parts[0], parts[1]
                 
                 sent_msg = await bot.send_audio(
@@ -193,11 +198,8 @@ async def chosen_handler(chosen_result: types.ChosenInlineResult):
             await bot.edit_message_caption(inline_message_id=inline_msg_id, caption="⚠️ Бот должен быть запущен в ЛС.")
             return
 
-        # 4. ЗАМЕНА ИНЛАЙНА (Smart Switch)
         if telegram_file_id:
             new_media = None
-            
-            # Проверяем совпадение типов
             if media_type == 'audio' and is_music:
                 new_media = InputMediaAudio(media=telegram_file_id, caption=caption_text, parse_mode="HTML")
             elif media_type == 'video' and not is_music:
@@ -210,7 +212,6 @@ async def chosen_handler(chosen_result: types.ChosenInlineResult):
                     try: await bot.delete_message(user_id, sent_msg.message_id)
                     except: pass
             else:
-                # Если типы не совпали (Audio -> Video), оставляем в ЛС
                 await bot.edit_message_caption(inline_message_id=inline_msg_id, caption="✅ Файл в ЛС (смена типа).")
 
     except Exception as e:
