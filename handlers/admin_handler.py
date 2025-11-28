@@ -13,20 +13,17 @@ from aiogram import Router, types, exceptions
 from aiogram.filters import Command
 from aiogram.types import FSInputFile
 from aiogram.exceptions import TelegramNetworkError
-from aiogram.enums import ChatAction
-
-# --- ИМПОРТЫ СЕРВИСОВ ---
+from aiogram.enums import ChatAction 
 from services.database_service import get_all_users, set_ban_status, get_user, clear_file_cache
 from logs.logger import send_log
 from handlers.message_handler import handle_link 
-# Импорт установщика для команды /fix_ffmpeg
 from core.installs.ffmpeg_installer import check_and_install_ffmpeg
-# ------------------------
 
 print("📢 [SYSTEM] Модуль handlers/admin_handler.py загружен!")
 
 router = Router()
 
+# --- СПИСОК ДЛЯ ТЕСТА СИСТЕМЫ ---
 HEALTH_CHECK_URLS = [
     ("YouTube", "https://youtu.be/jNQXAC9IVRw"), 
     ("YouTube Music", "https://music.youtube.com/watch?v=BvwG48W0tcc&si=7nPv0BXusq5oze8j"),
@@ -80,13 +77,11 @@ async def cmd_status(message: types.Message):
         report.append(f"💾 <b>DB:</b> 🟢 ({len(u)} users, {db_ms:.1f}ms)")
     except Exception as e: report.append(f"💾 <b>DB:</b> 🔴 Error: {e}")
 
-    # 3. Tools (FFmpeg)
+    # 3. Tools
     tools_status = []
-    # Проверяем локальный FFmpeg
     local_ffmpeg = os.path.join("core", "installs", "ffmpeg.exe")
     if os.path.exists(local_ffmpeg):
         tools_status.append("FFmpeg: 🟢 (Local)")
-    # Или системный
     elif shutil.which("ffmpeg"):
         tools_status.append("FFmpeg: 🟢 (System)")
     else:
@@ -119,18 +114,61 @@ async def cmd_check(message: types.Message):
         try:
             await status_msg.edit_text(f"⏳ Тестирую: <b>{name}</b>...\nСсылка: {url}", parse_mode="HTML")
             
-            # ИСПРАВЛЕНО: Используем .model_copy() для изменения замороженного объекта
             fake_message = message.model_copy(update={'text': url})
-            
-            # Вызываем обработчик
             await handle_link(fake_message)
-            
             await asyncio.sleep(2)
         except Exception as e:
             await message.answer(f"❌ Ошибка в тесте {name}: {e}")
 
     await status_msg.edit_text("✅ <b>Проверка завершена!</b>\nПроверьте сообщения выше.", parse_mode="HTML")
     await send_log("ADMIN", "Health Check завершен", admin=message.from_user)
+
+@router.message(Command("update"))
+async def cmd_update(message: types.Message):
+    if not is_admin(message.from_user.id): return
+
+    status_msg = await message.answer("🔄 <b>Принудительное обновление...</b>", parse_mode="HTML")
+    
+    try:
+        await message.bot.send_chat_action(chat_id=message.chat.id, action=ChatAction.TYPING)
+        
+        # 1. Fetch
+        proc_fetch = await asyncio.create_subprocess_shell(
+            "git fetch origin",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        await proc_fetch.communicate()
+
+        # 2. Hard Reset (Затираем локальные изменения, кроме .env и DB)
+        proc_reset = await asyncio.create_subprocess_shell(
+            "git reset --hard origin/main",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        stdout, stderr = await proc_reset.communicate()
+        
+        if proc_reset.returncode != 0:
+            await status_msg.edit_text(f"❌ <b>Ошибка Git:</b>\n<pre>{stderr.decode()}</pre>", parse_mode="HTML")
+            return
+
+        # Получаем инфо о коммите
+        proc_log = await asyncio.create_subprocess_shell("git log -1 --pretty=%B", stdout=asyncio.subprocess.PIPE)
+        log_out, _ = await proc_log.communicate()
+        commit_msg = log_out.decode().strip()
+
+        await status_msg.edit_text(
+            f"✅ <b>Обновлено успешно!</b>\n"
+            f"📝 Коммит: <i>{commit_msg}</i>\n\n"
+            f"♻️ Перезапуск...", 
+            parse_mode="HTML"
+        )
+        
+        await send_log("ADMIN", f"Система обновлена (Force Update). Коммит: {commit_msg}", admin=message.from_user)
+        sys.exit(65)
+        
+    except Exception as e:
+        await status_msg.edit_text(f"❌ Критическая ошибка: {e}")
 
 # --- CLEAR CACHE ---
 @router.message(Command("clearcache"))
@@ -149,7 +187,6 @@ async def cmd_fix_ffmpeg(message: types.Message):
     if not is_admin(message.from_user.id): return
     msg = await message.answer("🛠 <b>Установка FFmpeg...</b>", parse_mode="HTML")
     try:
-        # Запускаем установку
         await asyncio.to_thread(check_and_install_ffmpeg)
         if os.path.exists(os.path.join("core", "installs", "ffmpeg.exe")):
             await msg.edit_text("✅ <b>FFmpeg установлен!</b>")
@@ -162,6 +199,7 @@ async def cmd_fix_ffmpeg(message: types.Message):
 @router.message(Command("execute", "exec"))
 async def cmd_execute(message: types.Message):
     if not is_admin(message.from_user.id): return
+
     try:
         code = message.text.split(maxsplit=1)[1]
     except IndexError:
@@ -183,19 +221,19 @@ async def cmd_execute(message: types.Message):
         try: await message.react([types.ReactionTypeEmoji(emoji="👍")])
         except: await message.answer("✅ Выполнено")
     except Exception:
-        err = traceback.format_exc()
-        if len(err) > 3000: err = err[:3000] + "..."
-        await message.answer(f"❌ <b>Error:</b>\n<pre>{err}</pre>", parse_mode="HTML")
+        error_msg = traceback.format_exc()
+        if len(error_msg) > 3500: error_msg = error_msg[:3500] + "..."
+        await message.answer(f"❌ <b>Error:</b>\n{error_msg}", parse_mode=None)
 
-# --- GET PLACEHOLDERS ---
+# --- GET PLACEHOLDER ---
 @router.message(Command("get_placeholder"))
 async def cmd_get_placeholder(message: types.Message):
     if not is_admin(message.from_user.id): return
     
-    # Генерируем видео через ffmpeg
     filename = "temp_video_ph.mp4"
+    wait_msg = await message.answer("📤 Генерирую видео-заглушку...")
+    
     try:
-        # Проверяем наличие ffmpeg
         local_ffmpeg = os.path.join("core", "installs", "ffmpeg.exe")
         ffmpeg_cmd = local_ffmpeg if os.path.exists(local_ffmpeg) else "ffmpeg"
         
@@ -204,21 +242,34 @@ async def cmd_get_placeholder(message: types.Message):
             "-c:v", "libx264", "-t", "1", "-pix_fmt", "yuv420p", "-f", "mp4", filename
         ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
         
-        msg = await message.answer_video(FSInputFile(filename), caption="Video Placeholder")
-        await message.answer(f"Video ID: <code>{msg.video.file_id}</code>", parse_mode="HTML")
+        video = FSInputFile(filename)
+        sent_message = await message.answer_video(video, caption="Video Placeholder")
+        file_id = sent_message.video.file_id
+        
+        await wait_msg.delete()
+        await message.answer(f"✅ <b>Video ID:</b>\n<code>{file_id}</code>", parse_mode="HTML")
+        
     except Exception as e:
-        await message.answer(f"❌ Ошибка: {e}")
+        await message.answer(f"❌ Ошибка генерации: {e}")
     finally:
         if os.path.exists(filename): os.remove(filename)
 
 @router.message(Command("get_audio_placeholder"))
-async def cmd_get_audio_ph(message: types.Message):
+async def cmd_get_audio_placeholder(message: types.Message):
     if not is_admin(message.from_user.id): return
+    
     file_path = "silence.mp3"
-    with open(file_path, "wb") as f:
-        f.write(binascii.unhexlify("FFF304C40000000348000000004C414D45332E39382E320000000000000000000000000000000000000000000000000000000000000000000000000000000000"))
+    mp3_hex = "FFF304C40000000348000000004C414D45332E39382E320000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+    
+    with open(file_path, "wb") as f: f.write(binascii.unhexlify(mp3_hex))
+
     try:
-        msg = await message.answer_audio(FSInputFile(file_path), title="Searching...", performer="@ch4roff_bot")
+        bot_info = await message.bot.get_me()
+        msg = await message.answer_audio(
+            FSInputFile(file_path), 
+            title="Searching...", 
+            performer=f"@{bot_info.username}"
+        )
         await message.answer(f"Audio ID: <code>{msg.audio.file_id}</code>", parse_mode="HTML")
     finally:
         if os.path.exists(file_path): os.remove(file_path)
@@ -264,36 +315,56 @@ async def cmd_unban(message: types.Message):
     except: await message.answer("Usage: <code>/unban ID</code>", parse_mode="HTML")
 
 @router.message(Command("answer"))
-async def cmd_ans(message: types.Message):
+async def cmd_answer(message: types.Message):
     if not is_admin(message.from_user.id): return
     try:
         args = message.text.split(maxsplit=2)
-        # Вариант 1: Ответ на сообщение
-        if message.reply_to_message:
-            if len(args) < 2: raise ValueError
-            uid = message.reply_to_message.from_user.id
-            txt = args[1]
-        # Вариант 2: /answer ID TEXT
-        else:
-            if len(args) < 3: raise ValueError
-            uid = int(args[1])
-            txt = args[2]
-            
+        if message.reply_to_message: uid, txt = message.reply_to_message.from_user.id, args[1]
+        else: uid, txt = int(args[1]), args[2]
         await message.bot.send_message(uid, f"📩 <b>Admin:</b>\n{txt}", parse_mode="HTML")
         await message.answer("✅ Sent")
-    except Exception: 
-        await message.answer("Usage: <code>/answer ID TEXT</code> or reply", parse_mode="HTML")
+    except: await message.answer("Usage: <code>/answer ID TEXT</code> or reply", parse_mode="HTML")
 
 # --- UPDATE ---
 @router.message(Command("update"))
 async def cmd_update(message: types.Message):
     if not is_admin(message.from_user.id): return
-    msg = await message.answer("🔄 <b>Git Pull...</b>", parse_mode="HTML")
+    msg = await message.answer("🔄 <b>Принудительное обновление...</b>", parse_mode="HTML")
     try:
-        proc = await asyncio.create_subprocess_shell("git pull", stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
-        stdout, stderr = await proc.communicate()
-        res = stdout.decode()
-        if "Already up to date" in res: return await msg.edit_text("✅ Версия актуальна.")
-        await msg.edit_text(f"✅ Updated!\n<pre>{res}</pre>\n♻️ Restarting...", parse_mode="HTML")
+        # 1. Fetch
+        await message.bot.send_chat_action(chat_id=message.chat.id, action=ChatAction.TYPING)
+        proc_fetch = await asyncio.create_subprocess_shell(
+            "git fetch origin",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        await proc_fetch.communicate()
+
+        # 2. Hard Reset
+        proc_reset = await asyncio.create_subprocess_shell(
+            "git reset --hard origin/main",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        stdout, stderr = await proc_reset.communicate()
+        
+        if proc_reset.returncode != 0:
+            await msg.edit_text(f"❌ <b>Ошибка Git:</b>\n<pre>{stderr.decode()}</pre>", parse_mode="HTML")
+            return
+
+        # 3. Log info
+        proc_log = await asyncio.create_subprocess_shell("git log -1 --pretty=%B", stdout=asyncio.subprocess.PIPE)
+        log_out, _ = await proc_log.communicate()
+        commit_msg = log_out.decode().strip()
+
+        await msg.edit_text(
+            f"✅ <b>Обновлено успешно!</b>\n"
+            f"📝 Коммит: <i>{commit_msg}</i>\n\n"
+            f"♻️ Перезапуск...", 
+            parse_mode="HTML"
+        )
+        await send_log("ADMIN", f"Система обновлена (Force Update). Коммит: {commit_msg}", admin=message.from_user)
         sys.exit(65)
-    except Exception as e: await msg.edit_text(f"❌ Error: {e}")
+        
+    except Exception as e:
+        await msg.edit_text(f"❌ Критическая ошибка: {e}")
