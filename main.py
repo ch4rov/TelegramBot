@@ -8,26 +8,27 @@ from loader import bot, dp
 from services.database_service import init_db
 from logs.logger import send_log
 from aiogram import types
+from aiogram.types import BotCommand, BotCommandScopeDefault, BotCommandScopeChat
 from aiogram.dispatcher.middlewares.base import BaseMiddleware
 import settings 
 
-# --- ИМПОРТЫ НОВЫХ ХЕНДЛЕРОВ ---
-# (Старые users и admin мы больше не используем)
+# --- ИМПОРТЫ ХЕНДЛЕРОВ ---
 from handlers import message_handler, admin_handler, inline_handler, search_handler
+# --- ИМПОРТ ЗАЩИТЫ ---
+from middlewares import AccessMiddleware
+# --- УСТАНОВЩИК ---
+from core.installs.ffmpeg_installer import check_and_install_ffmpeg 
 
-# Отключаем многословные логи aiogram
 logging.getLogger('aiogram').setLevel(logging.WARNING)
 logging.getLogger('aiohttp').setLevel(logging.WARNING)
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s | %(message)s', datefmt='%H:%M:%S')
 
-
-# Middleware для консоли
 class ConsoleLoggerMiddleware(BaseMiddleware):
     async def __call__(self, handler, event, data):
         if isinstance(event, types.Update) and event.message:
             msg = event.message
             user = msg.from_user
-            text = msg.text or msg.caption or "[не-текстовое сообщение]"
+            text = msg.text or msg.caption or "[media]"
             if len(text) > 60: text = text[:57] + "..."
             username = user.username or user.first_name or "unknown"
             print(f"📨 @{username}({user.id}): {text}", flush=True)
@@ -52,29 +53,83 @@ def clean_downloads_on_startup():
     if not os.path.exists(settings.DOWNLOADS_DIR):
         os.makedirs(settings.DOWNLOADS_DIR)
 
+async def set_ui_commands(bot):
+    """
+    Автоматически обновляет кнопку Menu в Telegram.
+    1. Для всех: только пользовательские команды.
+    2. Для Админа: ВСЕ команды (включая бан, чек, статус).
+    """
+    user_commands = []
+    admin_commands = []
+
+    # Сортируем команды из settings.py
+    for cmd, desc, cat, copy in settings.BOT_COMMANDS_LIST:
+        command = BotCommand(command=cmd, description=desc)
+        
+        # Пользовательские команды идут всем
+        if cat == "user":
+            user_commands.append(command)
+            admin_commands.append(command) # Админу они тоже нужны
+        
+        # Админские команды (модерация и техника) - только в список админа
+        elif cat.startswith("admin"):
+            admin_commands.append(command)
+    
+    # 1. Устанавливаем меню для всех (Default Scope)
+    await bot.set_my_commands(user_commands, scope=BotCommandScopeDefault())
+    
+    # 2. Устанавливаем расширенное меню лично для Админа (Private Chat Scope)
+    # Берем ID из переменных окружения, так как settings может еще не подгрузить его
+    admin_id = os.getenv("ADMIN_ID")
+    if admin_id:
+        try:
+            await bot.set_my_commands(
+                admin_commands, 
+                scope=BotCommandScopeChat(chat_id=int(admin_id))
+            )
+            print(f"✅ [UI] Меню Админа обновлено для ID: {admin_id}")
+        except Exception as e:
+            print(f"⚠️ [UI] Не удалось обновить меню админа: {e}")
+            
+    print("✅ [UI] Общее меню обновлено")
+
 async def main():
+    # 1. Получение имени бота (для кэша)
+    try:
+        bot_info = await bot.get_me()
+        settings.BOT_USERNAME = bot_info.username
+        print(f"🤖 Бот авторизован: @{settings.BOT_USERNAME}")
+    except Exception as e:
+        print(f"❌ Ошибка авторизации бота: {e}")
+        return
+
+    # 2. Установка компонентов
+    check_and_install_ffmpeg()
     clean_downloads_on_startup()
     await init_db()
     
-    dp.update.middleware(ConsoleLoggerMiddleware())
+    # 3. Проверка режима
+    if settings.IS_TEST_ENV:
+        print("🛑 ВНИМАНИЕ: ВКЛЮЧЕН ТЕСТОВЫЙ РЕЖИМ")
+    else:
+        print("✅ ВКЛЮЧЕН STABLE РЕЖИМ")
+
+    # 4. Middleware
+    dp.update.outer_middleware(AccessMiddleware()) 
+    dp.update.outer_middleware(ConsoleLoggerMiddleware())
     
-    # --- ПОДКЛЮЧЕНИЕ РОУТЕРОВ (ЭТО ГЛАВНОЕ ИСПРАВЛЕНИЕ) ---
-    # Порядок важен!
-    
-    # 1. Админка
+    # 5. Роутеры
     dp.include_router(admin_handler.router)
-    
-    # 2. Поиск музыки (Кнопки Callback) - Должен быть до message_handler!
     dp.include_router(search_handler.router)
-    
-    # 3. Инлайн режим
     dp.include_router(inline_handler.router)
-    
-    # 4. Обработка сообщений (текст/ссылки) - В самом конце
     dp.include_router(message_handler.router)
 
-    print("🚀 Бот запущен (v2.5 Final)!")
-    await send_log("SYSTEM", "Система запущена.")
+    # 6. Обновление меню (UI)
+    # Вызываем ПОСЛЕ старта, чтобы API точно было доступно
+    await set_ui_commands(bot)
+
+    print("🚀 Бот запущен!")
+    await send_log("SYSTEM", f"Система запущена ({'TEST' if settings.IS_TEST_ENV else 'STABLE'}).")
     
     await bot.delete_webhook(drop_pending_updates=True)
     try:

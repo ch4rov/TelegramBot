@@ -5,7 +5,7 @@
 
 ## 📋 Требования
 - OS: Windows 10/11 или Linux (Ubuntu/Debian)
-- Python 3.9+
+- Python 3.14.0
 - Docker Desktop (для загрузки файлов > 50 МБ)
 - Git
 - FFmpeg

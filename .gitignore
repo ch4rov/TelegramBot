@@ -202,3 +202,5 @@ cython_debug/
 
 # Marimo
 logs/files/
+users.db
+

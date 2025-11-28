@@ -3,14 +3,15 @@ from urllib.parse import urlparse, parse_qs
 
 def clean_url(url: str) -> str:
     """
-    Приводит ссылки к каноническому виду для идеального кэширования.
+    Приводит ссылки к каноническому виду.
+    Сохраняет различие между YouTube Music и обычным YouTube.
     """
     url = url.strip()
     parsed = urlparse(url)
     domain = parsed.netloc.lower()
     path = parsed.path
 
-    # --- YOUTUBE (Видео и Shorts) ---
+    # --- YOUTUBE & MUSIC ---
     if 'youtube.com' in domain or 'youtu.be' in domain:
         video_id = None
         
@@ -23,26 +24,32 @@ def clean_url(url: str) -> str:
             if '/watch' in path:
                 qs = parse_qs(parsed.query)
                 video_id = qs.get('v', [None])[0]
-            # Вариант 3: youtube.com/shorts/ID
+            # Вариант 3: Shorts
             elif '/shorts/' in path:
                 video_id = path.split('/shorts/')[-1].strip('/')
 
         if video_id:
-            # Возвращаем единый стандарт для базы
-            return f"https://youtu.be/{video_id}"
+            # ВАЖНОЕ ИЗМЕНЕНИЕ: Если это Music, сохраняем домен music
+            if "music.youtube.com" in domain:
+                return f"https://music.youtube.com/watch?v={video_id}"
+            else:
+                return f"https://youtu.be/{video_id}"
 
-    # --- TIKTOK (Убираем мусор ?share_id=...) ---
+    # --- TIKTOK ---
     if 'tiktok.com' in domain:
-        # Для тиктока важно сохранить путь (там ID автора и видео), но убрать query параметры
-        # https://www.tiktok.com/@user/video/12345?is_from_webapp=1 -> https://www.tiktok.com/@user/video/12345
-        no_query_url = f"{parsed.scheme}://{domain}{path}"
-        return no_query_url
+        # Убираем query параметры, оставляем путь
+        return f"{parsed.scheme}://{domain}{path}"
 
-    # --- INSTAGRAM (Убираем ?igsh=...) ---
+    # --- INSTAGRAM ---
     if 'instagram.com' in domain:
-        no_query_url = f"{parsed.scheme}://{domain}{path}"
-        # Убираем слэш в конце для красоты
-        return no_query_url.rstrip('/')
+        # Убираем query параметры
+        return f"{parsed.scheme}://{domain}{path}".rstrip('/')
 
-    # Если сервис не специфичный, просто возвращаем url без пробелов
+    # Остальные (SoundCloud, Twitch)
+    # Просто убираем мусорные параметры (?si=...), если они есть,
+    # но для простоты можно вернуть очищенный от пробелов URL
+    # Для SoundCloud лучше отрезать query параметры вручную
+    if 'soundcloud.com' in domain:
+         return url.split('?')[0]
+
     return url

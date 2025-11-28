@@ -1,4 +1,10 @@
-from .base import base_download
+from services.platforms.common_downloader import CommonDownloader
+
+class TwitchStrategy(CommonDownloader):
+    def get_platform_settings(self) -> dict:
+        return {
+            'merge_output_format': 'mp4'
+        }
 
 async def download(url: str, custom_opts: dict = None):
     # Настройки специально для Twitch

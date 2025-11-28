@@ -16,18 +16,19 @@ from aiogram.types import (
     InlineKeyboardButton
 )
 from loader import bot
-from services.downloads import download_content, is_valid_url
+# --- ИСПРАВЛЕНО: Теперь берем из platform_manager ---
+from services.platforms.platform_manager import download_content, is_valid_url 
+# ----------------------------------------------------
 from services.database_service import get_user
 from services.lastfm_service import get_user_recent_track
 from services.search_service import search_music
-from services.placeholder_service import get_placeholder # <--- ИМПОРТИРУЕМ СЕРВИС
 import settings
 
 router = Router()
 
-# Константы удаляем, так как берем их динамически
-# PLACEHOLDER_VIDEO_ID = "..." 
-# PLACEHOLDER_AUDIO_ID = "..."
+# ID ЗАГЛУШЕК
+PLACEHOLDER_VIDEO_ID = "BAACAgIAAxkBAAE-Ud9pJTv8aMQwTbYs7hN5zHqb9Epz6AACE34AAraNMUnM0M23YCUF0DYE" 
+PLACEHOLDER_AUDIO_ID = "CQACAgIAAxkDAAIFcWkmO4LEqQIgMGeMrRlkJ7fLKQVxAAKRgQAC2IoxSbFgB6UvfGcbNgQ"
 
 @router.inline_query()
 async def inline_query_handler(query: types.InlineQuery):
@@ -35,13 +36,11 @@ async def inline_query_handler(query: types.InlineQuery):
     user_id = query.from_user.id
     results = []
 
-    # Получаем ID заглушек из базы (или генерируем новые)
-    video_ph = await get_placeholder('video')
-    audio_ph = await get_placeholder('audio')
-    
-    if not video_ph or not audio_ph:
-        # Если заглушек нет и создать не удалось - ничего не показываем
-        return
+    # --- ПОЛУЧАЕМ ID ЗАГЛУШЕК ---
+    # Мы не можем использовать get_placeholder() здесь, так как оно асинхронное
+    # Но мы будем использовать старые File ID как заглушки для упрощения.
+    video_ph = PLACEHOLDER_VIDEO_ID
+    audio_ph = PLACEHOLDER_AUDIO_ID
 
     # 1. ССЫЛКА -> ВИДЕО ПЛЕЙСХОЛДЕР
     if text and is_valid_url(text):
@@ -50,8 +49,8 @@ async def inline_query_handler(query: types.InlineQuery):
         ])
         results.append(InlineQueryResultCachedVideo(
             id=str(uuid.uuid4()),
-            video_file_id=video_ph, # <--- ИСПОЛЬЗУЕМ ПЕРЕМЕННУЮ
-            title="📥 Скачать видео",
+            video_file_id=video_ph,
+            title="📥 Скачать по ссылке",
             description="Нажмите для загрузки",
             caption="⏳ *Загрузка...*",
             parse_mode="Markdown",
@@ -71,18 +70,17 @@ async def inline_query_handler(query: types.InlineQuery):
 
         if search_query:
             result_id = f"music:{search_query[:50]}"
-            
             keyboard = InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text=f"🔎 {search_query}", callback_data="processing")]
             ])
-
             results.append(InlineQueryResultCachedAudio(
                 id=result_id,
-                audio_file_id=audio_ph, # <--- ИСПОЛЬЗУЕМ ПЕРЕМЕННУЮ
+                audio_file_id=audio_ph,
                 caption=f"🔎 Ищу: {search_query}...",
                 reply_markup=keyboard
             ))
         else:
+            # Подсказка логина
             results.append(InlineQueryResultArticle(
                 id="login_hint",
                 title="🔗 Подключить Last.fm",
@@ -115,15 +113,14 @@ async def chosen_handler(chosen_result: types.ChosenInlineResult):
             except: pass
             return
         url = res[0]['url']
-        title_found = res[0]['title']
-        try: await bot.edit_message_caption(inline_message_id=inline_msg_id, caption=f"📥 Качаю: {title_found}...")
+        try: await bot.edit_message_caption(inline_message_id=inline_msg_id, caption=f"📥 Качаю: {res[0]['title']}...")
         except: pass
     else:
         url = chosen_result.query.strip()
 
     if not url: return
 
-    # --- 2. СКАЧИВАЕМ ---
+    # --- 2. СКАЧИВАНИЕ ---
     custom_opts = {}
     if is_music:
         custom_opts = {
@@ -154,19 +151,24 @@ async def chosen_handler(chosen_result: types.ChosenInlineResult):
         target_file = media_files[0]
         filename = os.path.basename(target_file)
         filename_no_ext = os.path.splitext(filename)[0]
+        ext = os.path.splitext(target_file)[1].lower()
         
         media_obj = FSInputFile(target_file, filename=filename)
-        is_audio = filename.endswith(('.mp3', '.m4a', '.ogg', '.wav'))
+        is_audio = ext in ['.mp3', '.m4a', '.ogg', '.wav']
         
         clean_title = str(filename_no_ext).replace("&", "&amp;").replace("<", "&lt;")
         caption_text = f'<a href="{url}">{clean_title}</a>'
 
         telegram_file_id, media_type, sent_msg = None, None, None
 
-        # --- 3. ОТПРАВКА В ЛС ---
+# 3. ОТПРАВКА В ЛС
         try:
+            # Берем имя из настроек
+            current_bot_name = f"@{settings.BOT_USERNAME}" if settings.BOT_USERNAME else "@ch4roff_bot"
+
             if is_audio:
-                performer, title = "@ch4roff_bot", filename_no_ext
+                performer = current_bot_name # <--- ИСПОЛЬЗУЕМ ПЕРЕМЕННУЮ
+                title = filename_no_ext
                 if " - " in filename_no_ext: parts = filename_no_ext.split(" - ", 1); performer, title = parts[0], parts[1]
                 
                 sent_msg = await bot.send_audio(
@@ -187,16 +189,17 @@ async def chosen_handler(chosen_result: types.ChosenInlineResult):
                 telegram_file_id = sent_msg.video.file_id
                 media_type = 'video'
         except:
-            await bot.edit_message_caption(inline_message_id=inline_msg_id, caption="⚠️ Запустите бота в ЛС.")
+            await bot.edit_message_caption(inline_message_id=inline_msg_id, caption="⚠️ Бот должен быть запущен в ЛС.")
             return
 
-        # --- 4. ЗАМЕНА ИНЛАЙНА ---
+        # 4. ЗАМЕНА ИНЛАЙНА (Smart Switch)
         if telegram_file_id:
             new_media = None
             
-            if is_music and is_audio:
+            # Проверяем совпадение типов
+            if media_type == 'audio' and is_music:
                 new_media = InputMediaAudio(media=telegram_file_id, caption=caption_text, parse_mode="HTML")
-            elif not is_music and not is_audio:
+            elif media_type == 'video' and not is_music:
                 new_media = InputMediaVideo(media=telegram_file_id, caption=caption_text, parse_mode="HTML", supports_streaming=True)
             
             if new_media:
@@ -206,6 +209,7 @@ async def chosen_handler(chosen_result: types.ChosenInlineResult):
                     try: await bot.delete_message(user_id, sent_msg.message_id)
                     except: pass
             else:
+                # Если типы не совпали (Audio -> Video), оставляем в ЛС
                 await bot.edit_message_caption(inline_message_id=inline_msg_id, caption="✅ Файл в ЛС (смена типа).")
 
     except Exception as e:

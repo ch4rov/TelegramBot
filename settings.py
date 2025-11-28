@@ -41,12 +41,12 @@ if os.getenv("ADMIN_ID"):
 SAFE_CHARS = r'[a-zA-Z0-9\-\_\.\/\?\=\&\%\+\~]+'
 
 URL_PATTERNS = [
-    # VK Video
+    # VK
     r'^https?://(www\.|m\.)?vk\.(com|ru)/video.*',
     r'^https?://(www\.|m\.)?vk\.(com|ru)/clip.*',
     r'^https?://(www\.|m\.)?vkvideo\.ru/.*',
     
-    # TikTok
+    # TikTok (Обновил паттерн, чтобы точно ловил photo и video)
     r'^https?://(www\.|vm\.|vt\.|m\.)?tiktok\.com/.*', 
     
     # Instagram
@@ -62,3 +62,30 @@ URL_PATTERNS = [
     # Twitch
     r'^https?://(www\.|m\.|clips\.)?twitch\.tv/.*'
 ]
+
+
+# --- СПИСОК КОМАНД (Команда, Описание, Только_для_Админа) ---
+BOT_COMMANDS_LIST = [
+    # Пользователь
+    ("start", "Перезапустить бота", "user", False),
+    ("login", "Привязать Last.fm", "user", True),   
+    
+    # Админ - Модерация
+    ("users", "Список пользователей", "admin_mod", False),
+    ("ban", "Бан (нажми и введи ID)", "admin_mod", True),
+    ("unban", "Разбан (нажми и введи ID)", "admin_mod", True),
+    ("answer", "Ответ (нажми и введи ID)", "admin_mod", True),
+
+    
+    # Админ - Техническое
+    ("status", "Состояние системы", "admin_tech", False),
+    ("check", "Health Check (проверка загрузки)", "admin_tech", False),
+    ("update", "Обновить с GitHub", "admin_tech", False),
+    ("clearcache", "Очистить кэш файлов", "admin_tech", False),
+    ("fix_ffmpeg", "Переустановить FFmpeg", "admin_tech", False),
+    ("get_placeholder", "ID видео-заглушки", "admin_tech", False),
+    ("get_audio_placeholder", "ID аудио-заглушки", "admin_tech", False),
+    ("exec", "Python Console", "admin_tech", True),
+]
+
+BOT_USERNAME = ""

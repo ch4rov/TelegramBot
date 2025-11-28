@@ -1,9 +1,9 @@
+import os
 from aiogram import BaseMiddleware
-from aiogram.types import InlineQueryResultArticle, InputTextMessageContent
-from loader import IS_TEST_ENV # Флаг, который мы сделали в loader.py
-import settings
+from aiogram.types import Message, CallbackQuery, InlineQuery, InlineQueryResultArticle, InputTextMessageContent, Update
+import settings # <--- БЕРЕМ НАСТРОЙКИ ОТСЮДА
 
-# Ссылка на основного бота (чтобы пересылать людей)
+# Ссылка на основного бота
 STABLE_BOT_LINK = "https://t.me/ch4rov_bot"
 BLOCK_TEXT = (
     "🚧 <b>Тестовый режим</b>\n\n"
@@ -12,10 +12,11 @@ BLOCK_TEXT = (
 )
 
 class AccessMiddleware(BaseMiddleware):
-    async def __call__(self, handler, event, data):
+    async def __call__(self, handler, event: Update, data):
+        
         # 1. ГЛАВНАЯ ПРОВЕРКА:
-        # Если мы на Основном (Stable) боте — пропускаем всех без проверок!
-        if not IS_TEST_ENV:
+        # Берем переменную из settings.py
+        if not settings.IS_TEST_ENV:
             return await handler(event, data)
 
         # ----------------------------------------------------------------
@@ -29,16 +30,21 @@ class AccessMiddleware(BaseMiddleware):
         elif event.inline_query: user_id = event.inline_query.from_user.id
         elif event.chosen_inline_result: user_id = event.chosen_inline_result.from_user.id
 
-        # Если юзера нет в списке тестеров (из settings.py) -> БЛОКИРУЕМ
+        # Если юзера нет в списке тестеров -> БЛОКИРУЕМ
         if user_id and user_id not in settings.TESTERS_LIST:
+            
             # Блокировка сообщения
             if event.message:
-                await event.message.answer(BLOCK_TEXT, parse_mode="HTML", disable_web_page_preview=True)
+                try:
+                    await event.message.answer(BLOCK_TEXT, parse_mode="HTML", disable_web_page_preview=True)
+                except: pass
                 return
             
             # Блокировка кнопки
             elif event.callback_query:
-                await event.callback_query.answer("⛔ Только для тестеров.", show_alert=True)
+                try:
+                    await event.callback_query.answer("⛔ Доступ только для тестеров.", show_alert=True)
+                except: pass
                 return
             
             # Блокировка инлайна (показываем заглушку)
@@ -47,13 +53,16 @@ class AccessMiddleware(BaseMiddleware):
                     id="block",
                     title="🚧 Тестовый режим",
                     description="Доступ ограничен.",
-                    input_message_content=InputTextMessageContent(message_text=BLOCK_TEXT, parse_mode="HTML")
+                    input_message_content=InputTextMessageContent(message_text=BLOCK_TEXT, parse_mode="HTML", disable_web_page_preview=True)
                 )
-                await event.inline_query.answer([result], cache_time=5, is_personal=True)
+                try:
+                    await event.inline_query.answer([result], cache_time=5, is_personal=True)
+                except: pass
                 return
             
             # Игнорируем выбор результата
-            return 
+            elif event.chosen_inline_result:
+                return
 
         # Если это тестер — пропускаем
         return await handler(event, data)
