@@ -3,13 +3,14 @@ import shutil
 import traceback
 import html
 from aiogram import Router, F, types
-from aiogram.types import FSInputFile, InputMediaPhoto
+from aiogram.types import FSInputFile, InputMediaPhoto, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.enums import ChatAction
 from copy import copy
 
 # Импорты сервисов
 from services.database_service import add_or_update_user
 from services.platforms.platform_manager import download_content
+import settings # <--- ВОТ ЭТОГО НЕ ХВАТАЛО
 
 print("📢 [SYSTEM] Модуль handlers/search_handler.py загружен!")
 
@@ -17,7 +18,10 @@ router = Router()
 
 def make_caption(title_text, url):
     """Формирует стандартную подпись"""
-    bot_link = "@ch4roff_bot"
+    # Берем имя из настроек
+    bot_name = settings.BOT_USERNAME or "ch4roff_bot"
+    bot_link = f"@{bot_name}"
+    
     if not title_text: return bot_link
     safe_title = html.escape(title_text)
     return f'<a href="{url}">{safe_title}</a>\n\n{bot_link}'
@@ -30,20 +34,15 @@ async def delete_message(callback: types.CallbackQuery):
 # --- ОБРАБОТКА КНОПКИ "СКАЧАТЬ КЛИП" ---
 @router.callback_query(F.data.startswith("get_clip:"))
 async def handle_get_clip(callback: types.CallbackQuery):
-    """
-    Скачивание видео-версии трека по кнопке
-    """
-    # 1. Инициализация переменных
     try:
         video_id = callback.data.split(":")[1]
-        url = f"https://youtu.be/{video_id}" # <-- URL ТЕПЕРЬ ДОСТУПЕН ВЕЗДЕ
+        url = f"https://youtu.be/{video_id}"
     except IndexError:
-        await callback.answer("❌ Ошибка ID видео")
+        await callback.answer("❌ Ошибка ID")
         return
     
     await callback.answer("🎬 Загружаю клип...")
     
-    # 2. Изменяем статус
     try:
         await callback.message.edit_caption(
             caption=f"⏳ Загрузка <a href=\"{url}\">клипа</a>...", 
@@ -52,13 +51,9 @@ async def handle_get_clip(callback: types.CallbackQuery):
         )
     except: pass
 
-    # 3. Настройки скачивания (Принудительное видео)
-    custom_opts = {
-        'force_video': True, 
-    }
+    # Настройки: Принудительное видео
+    custom_opts = {'force_video': True}
 
-    # 4. Скачивание
-    # Теперь url точно существует
     files, folder_path, error = await download_content(url, custom_opts)
 
     if error:
@@ -70,33 +65,27 @@ async def handle_get_clip(callback: types.CallbackQuery):
     try:
         await callback.bot.send_chat_action(chat_id=callback.message.chat.id, action=ChatAction.UPLOAD_VIDEO)
         
-        # Ищем видеофайл
         video_file = next((f for f in files if f.endswith(('.mp4', '.mov', '.mkv'))), None)
         
         if not video_file: raise Exception("Video file not found")
         
-        # Парсинг названия
         filename = os.path.basename(video_file)
         filename_no_ext = os.path.splitext(filename)[0]
         
         final_caption = make_caption(filename_no_ext, url)
         
-        # 5. Отправляем Видео
+        # Отправляем Видео
         await callback.message.reply_video(
             FSInputFile(video_file),
             caption=final_caption,
             parse_mode="HTML",
-            thumbnail=None, 
+            thumbnail=None, # Без обложки (фикс квадрата)
             supports_streaming=True
         )
         
-        # 6. Возвращаем подпись Аудио
+        # Возвращаем подпись Аудио
         try:
-            await callback.message.edit_caption(
-                caption=final_caption,
-                parse_mode="HTML",
-                reply_markup=None 
-            )
+            await callback.message.edit_caption(caption=final_caption, parse_mode="HTML", reply_markup=None)
         except: pass
         
     except Exception as e:
@@ -113,7 +102,7 @@ async def handle_music_selection(callback: types.CallbackQuery):
     try:
         data_parts = callback.data.split(":", 2)
         if len(data_parts) < 3:
-            await callback.answer("❌ Ошибка данных кнопки")
+            await callback.answer("❌ Ошибка данных")
             return
             
         source = data_parts[1]
@@ -160,7 +149,11 @@ async def handle_music_selection(callback: types.CallbackQuery):
         if not target: raise Exception("Файл не создан")
 
         filename = os.path.basename(target)
-        performer = "@ch4roff_bot"
+        
+        # Динамическое имя бота
+        bot_name = settings.BOT_USERNAME or "ch4roff_bot"
+        performer = f"@{bot_name}"
+        
         title = os.path.splitext(filename)[0]
         if " - " in title:
             p_parts = title.split(" - ", 1)

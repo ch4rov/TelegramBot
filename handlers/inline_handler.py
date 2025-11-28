@@ -167,7 +167,8 @@ async def chosen_handler(chosen_result: types.ChosenInlineResult):
             current_bot_name = f"@{settings.BOT_USERNAME}" if settings.BOT_USERNAME else "@ch4roff_bot"
 
             if is_audio:
-                performer = current_bot_name # <--- ИСПОЛЬЗУЕМ ПЕРЕМЕННУЮ
+                current_bot_name = f"@{settings.BOT_USERNAME}" if settings.BOT_USERNAME else "@ch4roff_bot"
+                performer = current_bot_name
                 title = filename_no_ext
                 if " - " in filename_no_ext: parts = filename_no_ext.split(" - ", 1); performer, title = parts[0], parts[1]
                 

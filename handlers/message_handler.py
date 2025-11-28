@@ -16,7 +16,6 @@ from logs.logger import send_log_groupable as send_log, log_other_message
 from services.platforms.platform_manager import download_content, is_valid_url
 from services.url_cleaner import clean_url
 from services.search_service import search_youtube
-import messages as msg 
 import settings
 
 router = Router()
@@ -49,7 +48,10 @@ async def check_access_and_update(user, message: types.Message):
     return True, is_new
 
 def make_caption(title_text, url, override=None):
-    bot_link = "@ch4roff_bot"
+    # --- ИСПРАВЛЕНО: Берем имя динамически ---
+    bot_name = settings.BOT_USERNAME or "ch4roff_bot"
+    bot_link = f"@{bot_name}"
+    
     if override:
         safe_override = html.escape(override)
         return f"{safe_override}\n\n{bot_link}"
@@ -78,6 +80,7 @@ async def send_action_loop(bot: Bot, chat_id: int, action: ChatAction, delay: in
             await asyncio.sleep(delay)
     except asyncio.CancelledError: pass
 
+
 # --- КОМАНДЫ ---
 
 @router.message(CommandStart())
@@ -91,6 +94,7 @@ async def cmd_start(message: types.Message):
     
     is_admin_user = str(message.from_user.id) == str(ADMIN_ID)
     text = "🤖 <b>Меню команд</b>\n\n"
+    
     def format_cmd(cmd, desc, copy):
         if copy: return f"🔹 <code>/{cmd}</code> — {desc}\n"
         return f"🔹 /{cmd} — {desc}\n"
@@ -108,7 +112,9 @@ async def cmd_start(message: types.Message):
             if cat == "admin_tech": text += format_cmd(cmd, desc, copy).replace("🔹", "🔧")
 
     await message.answer(text, parse_mode="HTML")
-    if is_new: await send_log("NEW_USER", f"New: {message.from_user.full_name} (ID: {message.from_user.id})", user=message.from_user)
+
+    if is_new:
+        await send_log("NEW_USER", f"New: {message.from_user.full_name} (ID: {message.from_user.id})", user=message.from_user)
 
 @router.message(Command("menu"))
 async def cmd_menu(message: types.Message):
@@ -144,6 +150,7 @@ async def handle_document(message: types.Message):
         await message.answer("🍪 <b>Куки сохранены!</b>", parse_mode="HTML")
         await send_log("INFO", f"User uploaded cookies ({file_name})", user=message.from_user)
 
+
 # --- ОБРАБОТКА ССЫЛОК ---
 @router.message(F.text.contains("http"))
 async def handle_link(message: types.Message):
@@ -155,7 +162,8 @@ async def handle_link(message: types.Message):
     caption_override = None
     if "|" in url_raw:
         parts = url_raw.split("|", 1)
-        url_raw, caption_override = parts[0].strip(), parts[1].strip()
+        url_raw = parts[0].strip()
+        caption_override = parts[1].strip()
     
     for c in [';', '\n', ' ', '$', '`', '|']: 
         if c in url_raw: url_raw = url_raw.split(c)[0]
@@ -177,9 +185,10 @@ async def handle_link(message: types.Message):
                 await message.answer_video(db_cache['file_id'], caption=caption, parse_mode="HTML")
             elif db_cache['media_type'] == 'photo': 
                 await message.answer_photo(db_cache['file_id'], caption=caption, parse_mode="HTML")
+            
             await send_log("SUCCESS", f"Успешно [DB CACHE] (<{url}>)", user=user)
             return
-        except: pass
+        except Exception: pass
 
     # 2. ЗАГРУЗКА
     if ACTIVE_DOWNLOADS.get(user.id, 0) >= settings.MAX_CONCURRENT_DOWNLOADS:
@@ -192,14 +201,13 @@ async def handle_link(message: types.Message):
 
     files, folder_path, error = await download_content(url)
 
-    # --- ОБРАБОТКА ОШИБОК ---
     if error:
         err_str = str(error).lower()
         auth_markers = ["sign in", "login", "private", "access", "blocked", "followers", "confirm", "captcha", "unsupported url"]
         if any(m in err_str for m in auth_markers):
             user_cookies = await get_user_cookie(user.id)
             if user_cookies:
-                await status_msg.edit_text("🔐 Доступ ограничен. Использую ваши куки...")
+                await status_msg.edit_text("🔐 Доступ ограничен. Пробую куки...")
                 files, folder_path, error = await download_content(url, {'user_cookie_content': user_cookies})
             else:
                 await message.answer("🔒 <b>Требуется доступ.</b>\nПришлите файл <code>cookies.txt</code>.", parse_mode="HTML")
@@ -229,10 +237,10 @@ async def handle_link(message: types.Message):
         try:
             with open(info_json_file, 'r', encoding='utf-8') as f:
                 info = json.load(f)
-                height, width = info.get('height'), info.get('width')
-                if height and width:
-                    vid_height, vid_width = height, width
-                    res_str = "1080p" if height >= 1080 else f"{height}p"
+                h, w = info.get('height'), info.get('width')
+                if h and w:
+                    vid_height, vid_width = h, w
+                    res_str = "1080p" if h >= 1080 else f"{h}p"
                     resolution_text = f" ({res_str})"
                 title = info.get('title')
                 if title: name_no_ext = title
@@ -247,14 +255,16 @@ async def handle_link(message: types.Message):
         
         media_files = [f for f in files if f.endswith(tuple(video_exts + audio_exts + image_exts))]
         
-        # Типы
         is_tiktok_photo = "tiktok" in url and "/photo/" in url
-        is_video_url = any(x in url for x in ['youtube', 'youtu.be', 'vk.com', 'reel', '/video/', 'twitch']) and not is_tiktok_photo
+        is_video_url = any(x in url for x in ['youtube', 'youtu.be', 'vk.com', 'reel', '/video/', 'twitch'])
+        is_music_url = "music.youtube.com" in url
         
-        # Фильтр картинок для видео
-        if is_video_url:
-             media_files = [f for f in media_files if not f.endswith(tuple(image_exts))]
-
+        # Фильтр: если ждем видео, убираем картинки (кроме ТикТок фото и Музыки)
+        if is_video_url and not is_tiktok_photo and not is_music_url:
+             video_only = [f for f in media_files if not f.endswith(tuple(image_exts))]
+             if any(f.endswith(tuple(video_exts)) for f in video_only):
+                 media_files = video_only
+        
         if not media_files: raise Exception("No media files found")
 
         target = media_files[0]
@@ -268,31 +278,38 @@ async def handle_link(message: types.Message):
         sent_msg = None
         m_type = None 
 
-        # СЦЕНАРИЙ 1: СЛАЙДШОУ
+        # --- ТИКТОК СЛАЙДЫ ---
         if is_tiktok_photo and len([f for f in media_files if f.endswith(tuple(image_exts))]) > 1:
             await message.bot.send_chat_action(chat_id=message.chat.id, action=ChatAction.UPLOAD_PHOTO)
-            
-            image_files = [f for f in media_files if f.endswith(tuple(image_exts))]
-            audio_file = next((f for f in media_files if f.endswith(tuple(audio_exts))), None)
-            
             media_group = []
-            for i, img in enumerate(image_files[:10]):
+            images = [f for f in media_files if f.endswith(tuple(image_exts))]
+            
+            # Ищем аудио
+            audio_f = next((f for f in files if f.endswith(tuple(audio_exts))), None)
+            bot_tag = f"@{settings.BOT_USERNAME}" if settings.BOT_USERNAME else "@ch4roff_bot"
+
+            for i, img in enumerate(images[:10]):
                 cap = caption if i == 0 else None
                 media_group.append(InputMediaPhoto(media=FSInputFile(img), caption=cap, parse_mode="HTML"))
             
             await message.answer_media_group(media_group)
             
-            if audio_file:
-                await message.answer_audio(FSInputFile(audio_file), caption="🎵 Sound", performer="@ch4roff_bot")
+            if audio_f:
+                await message.answer_audio(FSInputFile(audio_f), caption="🎵 Sound", performer=bot_tag)
             
             await send_log("SUCCESS", f"TikTok Carousel (<{url}>)", user=user)
             await status_msg.delete()
             return
 
-        # СЦЕНАРИЙ 2: АУДИО
+        # --- АУДИО ---
         if ext in audio_exts:
             await message.bot.send_chat_action(chat_id=message.chat.id, action=ChatAction.UPLOAD_VOICE)
-            performer, title = "@ch4roff_bot", final_title
+            
+            # Имя бота динамически
+            current_bot_name = f"@{settings.BOT_USERNAME}" if settings.BOT_USERNAME else "@ch4roff_bot"
+            performer = current_bot_name
+            title = final_title
+            
             if " - " in final_title:
                 p = final_title.split(" - ", 1)
                 performer, title = p[0], p[1]
@@ -308,7 +325,7 @@ async def handle_link(message: types.Message):
             )
             m_type = "audio"
 
-        # СЦЕНАРИЙ 3: ВИДЕО
+        # --- ВИДЕО ---
         elif ext in video_exts:
             action_task = asyncio.create_task(send_action_loop(message.bot, message.chat.id, ChatAction.UPLOAD_VIDEO))
             sent_msg = await message.answer_video(
@@ -319,7 +336,7 @@ async def handle_link(message: types.Message):
             )
             m_type = "video"
         
-        # СЦЕНАРИЙ 4: ФОТО
+        # --- ФОТО ---
         else:
             sent_msg = await message.answer_photo(FSInputFile(target), caption=caption, parse_mode="HTML")
             m_type = "photo"
@@ -346,6 +363,7 @@ async def handle_link(message: types.Message):
         if ACTIVE_DOWNLOADS.get(user.id) > 0: ACTIVE_DOWNLOADS[user.id] -= 1
         if folder_path and os.path.exists(folder_path): shutil.rmtree(folder_path, ignore_errors=True)
 
+# --- ПОИСК ---
 @router.message(F.text & ~F.text.contains("http"))
 async def handle_plain_text(message: types.Message):
     user = message.from_user

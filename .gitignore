@@ -204,3 +204,5 @@ cython_debug/
 logs/files/
 users.db
 
+core/installs/ffmpeg.exe
+core/installs/ffprobe.exe
