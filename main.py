@@ -13,7 +13,7 @@ from aiogram.dispatcher.middlewares.base import BaseMiddleware
 import settings 
 
 # --- ИМПОРТЫ ---
-from handlers import message_handler, admin_handler, inline_handler, search_handler
+from handlers import user, admin, inline_handler, search_handler
 from middlewares import AccessMiddleware
 from core.installs.ffmpeg_installer import check_and_install_ffmpeg 
 # Импорт функции обновления заглушек
@@ -109,10 +109,10 @@ async def main():
     dp.update.outer_middleware(ConsoleLoggerMiddleware())
     
     # 5. Роутеры
-    dp.include_router(admin_handler.router)
+    dp.include_router(admin.admin_router)
     dp.include_router(search_handler.router)
     dp.include_router(inline_handler.router)
-    dp.include_router(message_handler.router)
+    dp.include_router(user.user_router)
 
     # 6. Обновление UI и Заглушек
     await set_ui_commands(bot)

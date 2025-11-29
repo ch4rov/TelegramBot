@@ -18,8 +18,7 @@ from aiogram.types import (
 from loader import bot
 from services.platforms.platform_manager import download_content, is_valid_url 
 from services.placeholder_service import get_placeholder 
-
-from services.database_service import get_user
+from services.database_service import get_user, get_module_status
 from services.lastfm_service import get_user_recent_track
 from services.search_service import search_music
 import settings
@@ -32,74 +31,56 @@ async def inline_query_handler(query: types.InlineQuery):
     user_id = query.from_user.id
     results = []
 
-    # --- 1. ПОЛУЧАЕМ ID ЗАГЛУШЕК ---
     video_ph = await get_placeholder('video')
     audio_ph = await get_placeholder('audio')
 
-    # --- ДИАГНОСТИКА (Если молчит - смотри сюда в консоль) ---
-    if not video_ph or not audio_ph:
-        print(f"❌ [INLINE ERROR] Нет ID заглушек! Video: {video_ph}, Audio: {audio_ph}")
-        print("   👉 Проверь TECH_CHAT_ID в .env")
-        print("   👉 Проверь, есть ли ffmpeg.exe в core/installs")
-        print("   👉 Проверь, админ ли бот в тех. чате")
-        
-        # Отправляем заглушку с ошибкой, чтобы ты увидел это в Телеграме
-        results.append(InlineQueryResultArticle(
-            id="error",
-            title="⚠️ Ошибка системы",
-            description="Плейсхолдеры не сгенерированы. Проверь консоль.",
-            input_message_content=InputTextMessageContent(message_text="System Error: Placeholders missing.")
-        ))
-        await query.answer(results, cache_time=0, is_personal=True)
-        return
-    # ---------------------------------------------------------
+    if not video_ph or not audio_ph: return
 
-    # 2. ССЫЛКА -> ВИДЕО ПЛЕЙСХОЛДЕР
+    # 1. VIDEO
     if text and is_valid_url(text):
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="📥 Скачать", callback_data="processing")]
-        ])
-        results.append(InlineQueryResultCachedVideo(
-            id=str(uuid.uuid4()),
-            video_file_id=video_ph, 
-            title="📥 Скачать по ссылке",
-            description="Нажмите для загрузки",
-            caption="⏳ *Загрузка...*",
-            parse_mode="Markdown",
-            reply_markup=keyboard
-        ))
+        if not await get_module_status("InlineVideo"):
+            results.append(InlineQueryResultArticle(
+                id="disabled", title="⛔ Модуль отключен", description="Инлайн-видео отключено.",
+                input_message_content=InputTextMessageContent(message_text="⚠️ Модуль <b>InlineVideo</b> отключен.", parse_mode="HTML")
+            ))
+        else:
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="📥 Скачать", callback_data="processing")]])
+            results.append(InlineQueryResultCachedVideo(
+                id=str(uuid.uuid4()), video_file_id=video_ph, 
+                title="📥 Скачать", description="Нажмите для загрузки",
+                caption="⏳ *Загрузка...*", parse_mode="Markdown", reply_markup=keyboard
+            ))
 
-    # 3. МУЗЫКА -> АУДИО ПЛЕЙСХОЛДЕР
+    # 2. AUDIO
     else:
+        if not await get_module_status("InlineAudio"):
+            if text:
+                 results.append(InlineQueryResultArticle(
+                    id="disabled_audio", title="⛔ Модуль отключен", description="Инлайн-музыка отключена.",
+                    input_message_content=InputTextMessageContent(message_text="⚠️ Модуль <b>InlineAudio</b> отключен.", parse_mode="HTML")
+                ))
+            await query.answer(results, cache_time=5, is_personal=True)
+            return
+
         search_query = text
         if not search_query:
             user_db = await get_user(user_id)
             lfm_user = user_db['lastfm_username'] if user_db and 'lastfm_username' in user_db else None
             if lfm_user:
                 track = await get_user_recent_track(lfm_user)
-                if track:
-                    search_query = track['query']
+                if track: search_query = track['query']
 
         if search_query:
             result_id = f"music:{search_query[:50]}"
-            keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text=f"🔎 {search_query}", callback_data="processing")]
-            ])
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=f"🔎 {search_query}", callback_data="processing")]])
             results.append(InlineQueryResultCachedAudio(
-                id=result_id,
-                audio_file_id=audio_ph,
-                caption=f"🔎 Ищу: {search_query}...",
-                reply_markup=keyboard
+                id=result_id, audio_file_id=audio_ph,
+                caption=f"🔎 Ищу: {search_query}...", reply_markup=keyboard
             ))
         else:
             results.append(InlineQueryResultArticle(
-                id="login_hint",
-                title="🔗 Подключить Last.fm",
-                description="Показывай свою музыку. Нажми сюда.",
-                input_message_content=InputTextMessageContent(
-                    message_text="Чтобы подключить Last.fm:\n👉 <code>/login ваш_ник</code>\n\nИли введите название песни.",
-                    parse_mode="HTML"
-                )
+                id="login_hint", title="🔗 Подключить Last.fm", description="Показывай свою музыку!",
+                input_message_content=InputTextMessageContent(message_text="Чтобы подключить Last.fm:\n👉 <code>/login ваш_ник</code>", parse_mode="HTML")
             ))
 
     await query.answer(results, cache_time=2, is_personal=True)
@@ -134,13 +115,11 @@ async def chosen_handler(chosen_result: types.ChosenInlineResult):
     if is_music:
         custom_opts = {
             'format': 'bestaudio/best',
-            'postprocessors': [
-                {'key': 'EmbedThumbnail'},
-                {'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '192'}
-            ]
+            'postprocessors': [{'key': 'EmbedThumbnail'}, {'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '192'}]
         }
 
-    files, folder_path, error = await download_content(url, custom_opts)
+    # --- ИСПРАВЛЕНО: 4 ЗНАЧЕНИЯ ---
+    files, folder_path, error, meta = await download_content(url, custom_opts)
 
     if error:
         try: await bot.edit_message_caption(inline_message_id=inline_msg_id, caption=f"❌ {error}")
@@ -160,13 +139,11 @@ async def chosen_handler(chosen_result: types.ChosenInlineResult):
         target_file = media_files[0]
         filename = os.path.basename(target_file)
         filename_no_ext = os.path.splitext(filename)[0]
-        ext = os.path.splitext(target_file)[1].lower()
         
         media_obj = FSInputFile(target_file, filename=filename)
-        is_audio = ext in ['.mp3', '.m4a', '.ogg', '.wav']
+        is_audio = filename.endswith(('.mp3', '.m4a', '.ogg', '.wav'))
         
         clean_title = str(filename_no_ext).replace("&", "&amp;").replace("<", "&lt;")
-        
         bot_name = f"@{settings.BOT_USERNAME}" if settings.BOT_USERNAME else "@ch4roff_bot"
         caption_text = f'<a href="{url}">{clean_title}</a>\n\n{bot_name}'
 

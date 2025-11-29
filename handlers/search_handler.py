@@ -2,6 +2,7 @@ import os
 import shutil
 import traceback
 import html
+import json 
 from aiogram import Router, F, types
 from aiogram.types import FSInputFile, InputMediaPhoto, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.enums import ChatAction
@@ -10,7 +11,7 @@ from copy import copy
 # Импорты сервисов
 from services.database_service import add_or_update_user
 from services.platforms.platform_manager import download_content
-import settings # <--- ВОТ ЭТОГО НЕ ХВАТАЛО
+import settings
 
 print("📢 [SYSTEM] Модуль handlers/search_handler.py загружен!")
 
@@ -18,7 +19,6 @@ router = Router()
 
 def make_caption(title_text, url):
     """Формирует стандартную подпись"""
-    # Берем имя из настроек
     bot_name = settings.BOT_USERNAME or "ch4roff_bot"
     bot_link = f"@{bot_name}"
     
@@ -51,10 +51,10 @@ async def handle_get_clip(callback: types.CallbackQuery):
         )
     except: pass
 
-    # Настройки: Принудительное видео
     custom_opts = {'force_video': True}
 
-    files, folder_path, error = await download_content(url, custom_opts)
+    # --- ИСПРАВЛЕНО: 4 ЗНАЧЕНИЯ ---
+    files, folder_path, error, meta = await download_content(url, custom_opts)
 
     if error:
         try: await callback.message.edit_caption(caption=f"❌ Ошибка: {error}")
@@ -69,21 +69,29 @@ async def handle_get_clip(callback: types.CallbackQuery):
         
         if not video_file: raise Exception("Video file not found")
         
-        filename = os.path.basename(video_file)
-        filename_no_ext = os.path.splitext(filename)[0]
+        # Метаданные из META (или JSON)
+        if not meta: meta = {}
+        clean_title = meta.get('title')
+
+        if not clean_title:
+             fname = os.path.basename(video_file)
+             clean_title = os.path.splitext(fname)[0]
+             if clean_title.endswith("]"):
+                 try: clean_title = clean_title.rsplit(" [", 1)[0]
+                 except: pass
+             if "_" in clean_title and " " not in clean_title:
+                 clean_title = clean_title.replace("_", " ")
+
+        final_caption = make_caption(clean_title, url)
         
-        final_caption = make_caption(filename_no_ext, url)
-        
-        # Отправляем Видео
         await callback.message.reply_video(
             FSInputFile(video_file),
             caption=final_caption,
             parse_mode="HTML",
-            thumbnail=None, # Без обложки (фикс квадрата)
+            thumbnail=None, 
             supports_streaming=True
         )
         
-        # Возвращаем подпись Аудио
         try:
             await callback.message.edit_caption(caption=final_caption, parse_mode="HTML", reply_markup=None)
         except: pass
@@ -116,49 +124,44 @@ async def handle_music_selection(callback: types.CallbackQuery):
         await add_or_update_user(user.id, user.username)
         await callback.answer("🎧 Начинаю загрузку...")
         
-        try:
-            await callback.message.edit_text(
-                f"📥 <b>Скачиваю трек...</b>\n<code>{url}</code>", 
-                reply_markup=None, parse_mode="HTML"
-            )
-        except: 
-            await callback.message.answer(f"📥 <b>Скачиваю...</b>", parse_mode="HTML")
+        try: await callback.message.edit_text(f"📥 <b>Скачиваю трек...</b>\n<code>{url}</code>", reply_markup=None, parse_mode="HTML")
+        except: await callback.message.answer(f"📥 <b>Скачиваю...</b>", parse_mode="HTML")
 
-        # Качаем АУДИО
         custom_opts = {
             'format': 'bestaudio/best',
-            'postprocessors': [
-                {'key': 'EmbedThumbnail'},
-                {'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '192'}
-            ]
+            'postprocessors': [{'key': 'EmbedThumbnail'}, {'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '192'}]
         }
         
-        files, folder_path, error = await download_content(url, custom_opts)
+        # --- ИСПРАВЛЕНО: 4 ЗНАЧЕНИЯ ---
+        files, folder_path, error, meta = await download_content(url, custom_opts)
 
         if error:
             try: await callback.message.edit_text(f"❌ Ошибка: {error}")
             except: pass
             return
 
-        # Отправка
         await callback.bot.send_chat_action(chat_id=callback.message.chat.id, action=ChatAction.UPLOAD_VOICE)
         
         target = next((f for f in files if f.endswith(('.mp3', '.m4a', '.ogg', '.wav'))), None)
         thumb = next((f for f in files if f.endswith(('.jpg', '.png', '.webp'))), None)
-
         if not target: raise Exception("Файл не создан")
 
+        if not meta: meta = {}
+        meta_artist = meta.get('artist') or meta.get('uploader')
+        meta_title = meta.get('track') or meta.get('title')
+
         filename = os.path.basename(target)
-        
-        # Динамическое имя бота
         bot_name = settings.BOT_USERNAME or "ch4roff_bot"
         performer = f"@{bot_name}"
+        title = meta_title or os.path.splitext(filename)[0]
         
-        title = os.path.splitext(filename)[0]
-        if " - " in title:
-            p_parts = title.split(" - ", 1)
-            performer = p_parts[0]
-            title = p_parts[1]
+        # Чистим название от мусора
+        title = re.sub(r'\[.*?\]', '', title).strip()
+
+        if meta_artist: performer = meta_artist
+        elif " - " in title:
+             p_parts = title.split(" - ", 1)
+             performer, title = p_parts[0], p_parts[1]
 
         caption_text = make_caption(f"{performer} - {title}", url)
 
@@ -178,7 +181,5 @@ async def handle_music_selection(callback: types.CallbackQuery):
         print(f"🔥 [SEARCH ERROR] {traceback.format_exc()}")
         try: await callback.message.answer(f"⚠️ Ошибка: {e}")
         except: pass
-        
     finally:
-        if folder_path and os.path.exists(folder_path):
-            shutil.rmtree(folder_path, ignore_errors=True)
+        if folder_path and os.path.exists(folder_path): shutil.rmtree(folder_path, ignore_errors=True)

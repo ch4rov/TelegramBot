@@ -2,12 +2,10 @@ import aiosqlite
 from datetime import datetime
 import settings
 
-# УБРАЛИ ИМПОРТ verbose_logger
-
 DB_NAME = "users.db"
 
 async def init_db():
-    # print(f"Инициализация БД: {DB_NAME}") # Можно убрать, чтобы не спамило
+    # print(f"Инициализация БД: {DB_NAME}") 
     async with aiosqlite.connect(DB_NAME) as db:
         await db.execute("""
             CREATE TABLE IF NOT EXISTS users (
@@ -38,6 +36,13 @@ async def init_db():
             )
         """)
         await db.execute("CREATE TABLE IF NOT EXISTS system_config (key TEXT PRIMARY KEY, value TEXT)")
+
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS modules_config (
+                module_name TEXT PRIMARY KEY,
+                is_enabled BOOLEAN DEFAULT 1
+            )
+        """)
         
         # Миграции
         try: await db.execute("ALTER TABLE users ADD COLUMN ban_reason TEXT DEFAULT NULL")
@@ -68,13 +73,14 @@ async def add_or_update_user(user_id, username):
                 (user_id, username, now, now, False, None, 1)
             )
             await db.commit()
-            print(f"➕ Новый юзер: {user_id} ({username})")
+            print(f"➕ [DB] Новый юзер: {user_id} ({username})")
             return True, False, None
 
 async def set_lastfm_username(user_id, lfm_user):
     async with aiosqlite.connect(DB_NAME) as db:
         await db.execute("UPDATE users SET lastfm_username = ? WHERE user_id = ?", (lfm_user, int(user_id)))
         await db.commit()
+        print(f"✅ [DB] Last.fm привязан: {user_id} -> {lfm_user}")
 
 async def get_user(user_id):
     async with aiosqlite.connect(DB_NAME) as db:
@@ -93,8 +99,10 @@ async def set_ban_status(user_id, is_banned: bool, reason: str = None):
     async with aiosqlite.connect(DB_NAME) as db:
         if is_banned:
             await db.execute("UPDATE users SET is_banned = ?, ban_reason = ? WHERE user_id = ?", (1, reason, user_id))
+            print(f"⛔ [DB] Юзер {user_id} ЗАБАНЕН.")
         else:
             await db.execute("UPDATE users SET is_banned = ?, ban_reason = NULL WHERE user_id = ?", (0, user_id))
+            print(f"✅ [DB] Юзер {user_id} РАЗБАНЕН.")
         await db.commit()
 
 async def set_user_active(user_id: int, is_active: bool):
@@ -109,7 +117,7 @@ async def get_cached_file(url):
         cursor = await db.execute("SELECT file_id, media_type, title FROM file_cache WHERE url = ?", (url,))
         row = await cursor.fetchone()
         if row:
-            print(f"♻️ Кэш найден: {url}")
+            print(f"♻️ [CACHE] Hit: {url}")
             return dict(row)
         return None
 
@@ -118,6 +126,7 @@ async def save_cached_file(url, file_id, media_type, title=None):
     async with aiosqlite.connect(DB_NAME) as db:
         await db.execute("INSERT OR REPLACE INTO file_cache (url, file_id, media_type, created_at, title) VALUES (?, ?, ?, ?, ?)", (url, file_id, media_type, now, title))
         await db.commit()
+        print(f"💾 [CACHE] Saved: {url} -> {file_id[:10]}...")
 
 # --- COOKIES ---
 async def save_user_cookie(user_id, cookie_content):
@@ -125,6 +134,7 @@ async def save_user_cookie(user_id, cookie_content):
     async with aiosqlite.connect(DB_NAME) as db:
         await db.execute("INSERT OR REPLACE INTO user_cookies (user_id, cookie_data, updated_at) VALUES (?, ?, ?)", (user_id, cookie_content, now))
         await db.commit()
+        print(f"🍪 [COOKIES] Сохранены для {user_id}")
 
 async def get_user_cookie(user_id):
     async with aiosqlite.connect(DB_NAME) as db:
@@ -145,7 +155,21 @@ async def set_system_value(key, value):
         await db.commit()
         
 async def clear_file_cache():
-    """Удаляет все записи из таблицы file_cache"""
     async with aiosqlite.connect(DB_NAME) as db:
         await db.execute("DELETE FROM file_cache")
         await db.commit()
+        print("🧹 [CACHE] Очищен полностью.")
+
+async def set_module_status(module_name: str, is_enabled: bool):
+    async with aiosqlite.connect(DB_NAME) as db:
+        await db.execute("INSERT OR REPLACE INTO modules_config (module_name, is_enabled) VALUES (?, ?)", (module_name, 1 if is_enabled else 0))
+        await db.commit()
+        status = 'ВКЛЮЧЕН' if is_enabled else 'ОТКЛЮЧЕН'
+        print(f"🔄 [MODULES] {module_name} -> {status}")
+
+async def get_module_status(module_name: str) -> bool:
+    async with aiosqlite.connect(DB_NAME) as db:
+        cursor = await db.execute("SELECT is_enabled FROM modules_config WHERE module_name = ?", (module_name,))
+        row = await cursor.fetchone()
+        if row is None: return True
+        return bool(row[0])

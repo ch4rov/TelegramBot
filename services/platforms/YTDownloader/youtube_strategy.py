@@ -1,28 +1,29 @@
 from services.platforms.common_downloader import CommonDownloader
 
 class YouTubeVideoStrategy(CommonDownloader):
-    """
-    Стратегия ТОЛЬКО для YouTube Video (Main/Shorts).
-    """
     def get_platform_settings(self) -> dict:
         return {
-            # Ограничиваем 1080p, берем MP4
-            'format': 'bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080][ext=mp4]/best',
-            
-            # Склейка
+            # 1. Пытаемся скачать сразу готовый H.264 (avc1)
+            'format': 'bestvideo[vcodec^=avc1]+bestaudio[ext=m4a]/best[ext=mp4]/best',
             'merge_output_format': 'mp4',
             
+            # 2. ЖЕСТКОЕ ПЕРЕКОДИРОВАНИЕ (Если скачалось не то)
             'postprocessors': [
-                # Гарантируем MP4 контейнер
-                {'key': 'FFmpegVideoConvertor', 'preferedformat': 'mp4'},
+                {
+                    'key': 'FFmpegVideoConvertor',
+                    'preferedformat': 'mp4',
+                    # -vcodec libx264: Стандарт для iPhone
+                    # -pix_fmt yuv420p: Обязательно для совместимости
+                    # -acodec aac: Звук
+                    'options': [
+                        '-vcodec', 'libx264', 
+                        '-pix_fmt', 'yuv420p', 
+                        '-acodec', 'aac', 
+                        '-movflags', '+faststart'
+                    ]
+                },
                 {'key': 'FFmpegMetadata', 'add_metadata': True},
                 {'key': 'FFmpegThumbnailsConvertor', 'format': 'jpg'}
             ],
-            
-            # Обход блокировок
-            'extractor_args': {
-                'youtube': {
-                    'player_client': 'default',
-                }
-            }
+            'extractor_args': {'youtube': {'player_client': 'default'}}
         }
