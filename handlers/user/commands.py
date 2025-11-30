@@ -29,48 +29,61 @@ def convert_json_to_netscape(json_content: str) -> str:
         return "\n".join(netscape_lines)
     except Exception: return None
 
-# --- ДИНАМИЧЕСКИЙ СПИСОК СЕРВИСОВ ---
-async def build_services_list() -> str:
-    """Строит список сервисов на основе включенных модулей"""
+async def build_start_message(bot_username: str) -> tuple[str, str]:
+    """
+    Генерирует два текста: список сервисов и инструкцию,
+    основываясь на статусе модулей в БД.
+    """
+    
+    # 1. СПИСОК СЕРВИСОВ
     services = []
+    if await get_module_status("YouTube"): services.append("📺 <b>YouTube</b>")
     
-    # YouTube (Проверяем основной модуль)
-    if await get_module_status("YouTube"):
-        services.append("📺 <b>YouTube</b> (Video, Shorts, Music)")
-    
-    # TikTok (Проверяем видео или фото)
     tt_vid = await get_module_status("TikTokVideos")
     tt_photo = await get_module_status("TikTokPhotos")
-    if tt_vid or tt_photo:
-        parts = []
-        if tt_vid: parts.append("Video")
-        if tt_photo: parts.append("Photo")
-        services.append(f"🎵 <b>TikTok</b> ({', '.join(parts)})")
+    if tt_vid or tt_photo: services.append(f"🎵 <b>TikTok</b>")
     
-    # Instagram
-    if await get_module_status("Instagram"):
-        services.append("📸 <b>Instagram</b> (Reels)")
-        
-    # VK
-    if await get_module_status("VK"):
-        services.append("🔵 <b>VK Video</b>")
-        
-    # SoundCloud
-    if await get_module_status("SoundCloud"):
-        services.append("☁️ <b>SoundCloud</b>")
-        
-    # Twitch
-    if await get_module_status("Twitch"):
-        services.append("👾 <b>Twitch</b> (Clips)")
+    if await get_module_status("Instagram"): services.append("📸 <b>Instagram</b>")
+    if await get_module_status("VK"): services.append("🔵 <b>VK Video</b>")
+    if await get_module_status("SoundCloud"): services.append("☁️ <b>SoundCloud</b>")
+    if await get_module_status("Twitch"): services.append("👾 <b>Twitch</b>")
+    if await get_module_status("Spotify"): services.append("🎧 <b>Spotify</b>")
+    
+    services_text = ", ".join(services) if services else "❌ <i>Нет активных сервисов</i>"
 
-    # Spotify
-    if await get_module_status("Spotify"):
-        services.append("🎧 <b>Spotify</b>")
-        
-    if not services:
-        return "❌ <i>Все сервисы временно недоступны</i>"
-        
-    return "\n".join(services)
+    # 2. ИНСТРУКЦИЯ (USAGE)
+    usage_lines = []
+    counter = 1
+
+    # -- Пункт 1: ЛС (Ссылки + Текст) --
+    text_find = await get_module_status("TextFind")
+    if text_find:
+        usage_lines.append(f"{counter}. <b>Личные сообщения:</b> Отправь ссылку на видео или название трека.")
+    else:
+        usage_lines.append(f"{counter}. <b>Личные сообщения:</b> Отправь ссылку на видео.")
+    counter += 1
+
+    # -- Пункт 2: Инлайн --
+    inline_aud = await get_module_status("InlineAudio")
+    inline_vid = await get_module_status("InlineVideo")
+    
+    if inline_aud or inline_vid:
+        inline_parts = []
+        if inline_aud:
+            inline_parts.append(f"<code>@{bot_username} песня</code> для поиска музыки")
+        if inline_vid:
+            inline_parts.append(f"<code>@{bot_username} ссылка</code> для отправки видео")
+            
+        joiner = " или " if (inline_aud and inline_vid) else ""
+        text = f"{counter}. <b>Инлайн:</b> Напиши {joiner.join(inline_parts)}."
+        usage_lines.append(text)
+        counter += 1
+
+    # -- Пункт 3: Видеосообщения --
+    if await get_module_status("TelegramVideo"):
+        usage_lines.append(f"{counter}. <b>Видео-сообщения:</b> Команда /videomessage для создания \"кружочков\".")
+
+    return services_text, "\n".join(usage_lines)
 
 @user_router.message(CommandStart())
 async def cmd_start(message: types.Message):
@@ -79,13 +92,13 @@ async def cmd_start(message: types.Message):
     
     bot_info = await message.bot.get_me()
     
-    # Генерируем список активных сервисов
-    active_services_text = await build_services_list()
+    # Генерируем динамический текст
+    services_txt, usage_txt = await build_start_message(bot_info.username)
     
     welcome_text = msg.MSG_START.format(
         name=html.escape(message.from_user.first_name),
-        bot_name=bot_info.username,
-        services_text=active_services_text # Вставляем динамический список
+        services_text=services_txt,
+        usage_text=usage_txt
     )
     
     await message.answer(welcome_text, parse_mode="HTML")
@@ -93,7 +106,6 @@ async def cmd_start(message: types.Message):
     # Меню команд
     is_admin_user = str(message.from_user.id) == str(ADMIN_ID)
     text = "🤖 <b>Меню команд</b>\n\n"
-    
     def format_cmd(cmd, desc, copy):
         return f"🔹 <code>/{cmd}</code> — {desc}\n" if copy else f"🔹 /{cmd} — {desc}\n"
 
@@ -101,7 +113,9 @@ async def cmd_start(message: types.Message):
     for cmd, desc, cat, copy in settings.BOT_COMMANDS_LIST:
         if cat == "user": text += format_cmd(cmd, desc, copy)
     
-    text += "🔹 /videomessage — Сделать кружочек\n"
+    # Добавляем кнопку кружочков в меню, только если модуль включен
+    if await get_module_status("TelegramVideo"):
+        text += "🔹 /videomessage — Сделать кружочек\n"
 
     if is_admin_user:
         text += "\n🛡 <b>Админ:</b>\n"
@@ -109,7 +123,9 @@ async def cmd_start(message: types.Message):
             if cat.startswith("admin"): text += format_cmd(cmd, desc, copy).replace("🔹", "🔸")
 
     await message.answer(text, parse_mode="HTML")
-    if is_new: await send_log("NEW_USER", f"New: {message.from_user.full_name}", user=message.from_user)
+
+    if is_new:
+        await send_log("NEW_USER", f"New: {message.from_user.full_name}", user=message.from_user)
 
 @user_router.message(Command("menu"))
 async def cmd_menu(message: types.Message):
