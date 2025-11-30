@@ -45,10 +45,17 @@ async def cmd_status(message: types.Message):
 
     # Tools
     tools_status = []
+    import os
     local_ffmpeg = os.path.join("core", "installs", "ffmpeg.exe")
     if os.path.exists(local_ffmpeg): tools_status.append("FFmpeg: 🟢 (Local)")
     elif shutil.which("ffmpeg"): tools_status.append("FFmpeg: 🟢 (System)")
     else: tools_status.append("FFmpeg: 🔴")
+    
+    try: 
+        import yt_dlp
+        v = yt_dlp.version.__version__
+        tools_status.append(f"yt-dlp: 🟢 (v{v})")
+    except: tools_status.append("yt-dlp: 🔴")
     
     report.append(f"🛠 <b>Tools:</b> " + " | ".join(tools_status))
     
@@ -57,6 +64,11 @@ async def cmd_status(message: types.Message):
         total, _, free = shutil.disk_usage(".")
         report.append(f"💿 <b>Disk:</b> {free / (2**30):.1f}GB free")
     except: pass
+
+    # Info
+    sys_info = f"Python {sys.version.split()[0]} / {platform.system()}"
+    # --- БЕРЕМ ВЕРСИЮ ИЗ SETTINGS ---
+    report.append(f"📦 <b>Bot Ver:</b> <code>{settings.BOT_VERSION}</code> | {sys_info}")
 
     total_time = time.perf_counter() - start_time_total
     await status_msg.edit_text(f"📊 <b>SYSTEM STATUS</b> ({total_time:.2f}s)\n" + "─"*20 + "\n" + "\n".join(report), parse_mode="HTML")

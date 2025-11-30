@@ -3,6 +3,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+BOT_VERSION = "2.5"
+
 # --- ТОКЕНЫ ---
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 TEST_BOT_TOKEN = os.getenv("TEST_BOT_TOKEN")
