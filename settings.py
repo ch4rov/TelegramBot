@@ -3,7 +3,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-BOT_VERSION = "2.5"
+BOT_VERSION = "2.5.2"
 
 # --- ТОКЕНЫ ---
 BOT_TOKEN = os.getenv("BOT_TOKEN")
@@ -19,7 +19,7 @@ MAX_FILE_SIZE = 2000 * 1024 * 1024 if USE_LOCAL_SERVER else 50 * 1024 * 1024
 MAX_CONCURRENT_DOWNLOADS = 3
 
 # --- ПУТИ И API ---
-DOWNLOADS_DIR = "downloadAndRemove"
+DOWNLOADS_DIR = "downloads"
 LASTFM_API_KEY = os.getenv("LASTFM_API_KEY")
 LASTFM_API_URL = "http://ws.audioscrobbler.com/2.0/"
 TECH_CHAT_ID = os.getenv("TECH_CHAT_ID")

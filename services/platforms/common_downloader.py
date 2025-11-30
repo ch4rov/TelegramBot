@@ -107,7 +107,6 @@ class CommonDownloader(ABC):
 
         # === SAFE MODE ===
         if not files or capture_logger.error_message:
-            print(f"⚠️ [DOWNLOAD] Retry Safe Mode...")
             self._clean_folder()
 
             capture_logger_2 = ErrorCaptureLogger()

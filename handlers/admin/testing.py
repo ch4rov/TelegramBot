@@ -24,6 +24,8 @@ HEALTH_CHECK_URLS = [
     ("VK Video", "https://vk.com/video-22822305_456239018"),
     ("Instagram", "https://www.instagram.com/reel/DQyynEMinzX/?igsh=NmxhYmN6ZmkzbGE4"), 
     ("Twitch", "https://www.twitch.tv/ch4rov/clip/SmokyDirtyBobaResidentSleeper-geWW-E5kg0Tp-vs8"),
+    ("Spotify", "https://open.spotify.com/track/7ouMYWpwJ422jRcDASZB7P?si=1234567890abcdef"),
+
 ]
 
 @admin_router.message(Command("check"))
