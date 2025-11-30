@@ -3,6 +3,8 @@ import shutil
 import uuid
 import asyncio
 import html
+import json
+import re
 from aiogram import Router, types
 from aiogram.types import (
     InlineQueryResultCachedVideo, 
@@ -25,6 +27,26 @@ import settings
 
 router = Router()
 
+def make_caption(title_text, url):
+    bot_name = settings.BOT_USERNAME or "ch4roff_bot"
+    bot_link = f"@{bot_name}"
+    if not title_text: return bot_link
+    safe_title = html.escape(title_text)
+    return f'<a href="{url}">{safe_title}</a>\n\n{bot_link}'
+
+def get_clip_keyboard(url: str):
+    if "music.youtube.com" in url or "youtu" in url:
+        video_id = None
+        if "v=" in url: 
+            try: video_id = url.split("v=")[1].split("&")[0]
+            except: pass
+        elif "youtu.be/" in url: 
+            try: video_id = url.split("youtu.be/")[1].split("?")[0]
+            except: pass
+        if video_id:
+            return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🎬 Загрузить клип", callback_data=f"get_clip:{video_id}")]])
+    return None
+
 @router.inline_query()
 async def inline_query_handler(query: types.InlineQuery):
     text = query.query.strip()
@@ -36,28 +58,34 @@ async def inline_query_handler(query: types.InlineQuery):
 
     if not video_ph or not audio_ph: return
 
-    # 1. VIDEO
+    # --- СЦЕНАРИЙ 1: ССЫЛКА (ВИДЕО/ТИКТОК/INSTA) ---
     if text and is_valid_url(text):
         if not await get_module_status("InlineVideo"):
             results.append(InlineQueryResultArticle(
-                id="disabled", title="⛔ Модуль отключен", description="Инлайн-видео отключено.",
-                input_message_content=InputTextMessageContent(message_text="⚠️ Модуль <b>InlineVideo</b> отключен.", parse_mode="HTML")
+                id="disabled", title="⛔ Модуль отключен", 
+                input_message_content=InputTextMessageContent(message_text="⚠️ Инлайн-загрузка отключена.")
             ))
         else:
-            keyboard = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="📥 Скачать", callback_data="processing")]])
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🚀 Загрузка...", callback_data="processing")]])
+            
+            # Красивый заголовок в меню
             results.append(InlineQueryResultCachedVideo(
-                id=str(uuid.uuid4()), video_file_id=video_ph, 
-                title="📥 Скачать", description="Нажмите для загрузки",
-                caption="⏳ *Загрузка...*", parse_mode="Markdown", reply_markup=keyboard
+                id=str(uuid.uuid4()),
+                video_file_id=video_ph, 
+                title="📥 Скачать по ссылке", # Заголовок
+                description=text,             # Ссылка в описании
+                caption="⏳ *Начинаю загрузку...*", 
+                parse_mode="Markdown",
+                reply_markup=keyboard
             ))
 
-    # 2. AUDIO
+    # --- СЦЕНАРИЙ 2: ПОИСК МУЗЫКИ ---
     else:
         if not await get_module_status("InlineAudio"):
             if text:
                  results.append(InlineQueryResultArticle(
-                    id="disabled_audio", title="⛔ Модуль отключен", description="Инлайн-музыка отключена.",
-                    input_message_content=InputTextMessageContent(message_text="⚠️ Модуль <b>InlineAudio</b> отключен.", parse_mode="HTML")
+                    id="disabled_audio", title="⛔ Модуль отключен", 
+                    input_message_content=InputTextMessageContent(message_text="⚠️ Инлайн-поиск отключен.")
                 ))
             await query.answer(results, cache_time=5, is_personal=True)
             return
@@ -73,14 +101,21 @@ async def inline_query_handler(query: types.InlineQuery):
         if search_query:
             result_id = f"music:{search_query[:50]}"
             keyboard = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=f"🔎 {search_query}", callback_data="processing")]])
+            
+            # Красивый заголовок в меню: "Отправить: Название"
             results.append(InlineQueryResultCachedAudio(
-                id=result_id, audio_file_id=audio_ph,
-                caption=f"🔎 Ищу: {search_query}...", reply_markup=keyboard
+                id=result_id, 
+                audio_file_id=audio_ph,
+                caption=f"🔎 Ищу: {search_query}...", # То, что отправится сначала
+                reply_markup=keyboard
             ))
         else:
             results.append(InlineQueryResultArticle(
-                id="login_hint", title="🔗 Подключить Last.fm", description="Показывай свою музыку!",
-                input_message_content=InputTextMessageContent(message_text="Чтобы подключить Last.fm:\n👉 <code>/login ваш_ник</code>", parse_mode="HTML")
+                id="login_hint", title="🔗 Подключить Last.fm", 
+                description="Показывай музыку в статусе",
+                input_message_content=InputTextMessageContent(
+                    message_text="Чтобы подключить Last.fm:\n👉 <code>/login ваш_ник</code>", parse_mode="HTML"
+                )
             ))
 
     await query.answer(results, cache_time=2, is_personal=True)
@@ -118,12 +153,12 @@ async def chosen_handler(chosen_result: types.ChosenInlineResult):
             'postprocessors': [{'key': 'EmbedThumbnail'}, {'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '192'}]
         }
 
-    # --- ИСПРАВЛЕНО: 4 ЗНАЧЕНИЯ ---
     files, folder_path, error, meta = await download_content(url, custom_opts)
 
     if error:
         try: await bot.edit_message_caption(inline_message_id=inline_msg_id, caption=f"❌ {error}")
         except: pass
+        if folder_path: shutil.rmtree(folder_path, ignore_errors=True)
         return
 
     try:
@@ -138,27 +173,79 @@ async def chosen_handler(chosen_result: types.ChosenInlineResult):
 
         target_file = media_files[0]
         filename = os.path.basename(target_file)
-        filename_no_ext = os.path.splitext(filename)[0]
+        ext = os.path.splitext(target_file)[1].lower()
         
         media_obj = FSInputFile(target_file, filename=filename)
-        is_audio = filename.endswith(('.mp3', '.m4a', '.ogg', '.wav'))
+        is_audio = ext in ['.mp3', '.m4a', '.ogg', '.wav']
         
-        clean_title = str(filename_no_ext).replace("&", "&amp;").replace("<", "&lt;")
-        bot_name = f"@{settings.BOT_USERNAME}" if settings.BOT_USERNAME else "@ch4roff_bot"
-        caption_text = f'<a href="{url}">{clean_title}</a>\n\n{bot_name}'
+        # --- ПАРСИНГ МЕТАДАННЫХ (КАК В ОБЫЧНОМ РЕЖИМЕ) ---
+        resolution_text = ""
+        clean_title = None
+        meta_artist = None
+        meta_title = None
+
+        # 1. Берем из meta (возвращенной download_content)
+        if meta:
+            h, w = meta.get('height'), meta.get('width')
+            if h and w:
+                res_str = "1080p" if h >= 1080 else f"{h}p"
+                resolution_text = f" ({res_str})"
+            meta_artist = meta.get('artist') or meta.get('uploader') or meta.get('channel')
+            meta_title = meta.get('track') or meta.get('title') or meta.get('alt_title')
+
+        # 2. Если meta пустая, ищем JSON на диске (резерв)
+        if not meta_title:
+            info_json_file = next((f for f in files if f.endswith(('.info.json'))), None)
+            if info_json_file:
+                try:
+                    with open(info_json_file, 'r', encoding='utf-8') as f:
+                        info = json.load(f)
+                        meta_artist = info.get('artist') or info.get('uploader')
+                        meta_title = info.get('title')
+                except: pass
+
+        # 3. Чистка имени файла
+        fname = os.path.basename(target_file)
+        clean_filename = os.path.splitext(fname)[0]
+        clean_filename = re.sub(r'\[.*?\]', '', clean_filename).strip()
+        if "_" in clean_filename and " " not in clean_filename:
+            clean_filename = clean_filename.replace("_", " ")
+
+        # 4. Финальная сборка
+        final_artist = meta_artist
+        final_title = meta_title if meta_title else clean_filename
+
+        if not final_artist and " - " in final_title:
+            parts = final_title.split(" - ", 1)
+            final_artist = parts[0]
+            final_title = parts[1]
+        
+        if not final_artist:
+            final_artist = f"@{settings.BOT_USERNAME or 'ch4roff_bot'}"
+
+        caption_header = final_title
+        if meta_artist and meta_artist not in final_title:
+            caption_header = f"{meta_artist} - {final_title}"
+            
+        caption_text = make_caption(f"{caption_header}{resolution_text}", url)
+        # ---------------------------------------------------
 
         telegram_file_id, media_type, sent_msg = None, None, None
 
+        # 3. ОТПРАВКА В ЛС
         try:
             if is_audio:
-                performer, title = bot_name, filename_no_ext
-                if " - " in filename_no_ext: parts = filename_no_ext.split(" - ", 1); performer, title = parts[0], parts[1]
+                thumb = FSInputFile(thumb_file) if thumb_file else None
+                # Добавляем кнопку клипа, если это YouTube
+                reply_markup = get_clip_keyboard(url)
                 
                 sent_msg = await bot.send_audio(
                     user_id, media_obj, 
                     caption=caption_text, parse_mode="HTML",
-                    thumbnail=FSInputFile(thumb_file) if thumb_file else None,
-                    performer=performer, title=title, disable_notification=True
+                    thumbnail=thumb,
+                    performer=final_artist, title=final_title,
+                    disable_notification=True,
+                    reply_markup=reply_markup
                 )
                 telegram_file_id = sent_msg.audio.file_id
                 media_type = 'audio'
@@ -166,17 +253,20 @@ async def chosen_handler(chosen_result: types.ChosenInlineResult):
                 sent_msg = await bot.send_video(
                     user_id, media_obj, 
                     caption=caption_text, parse_mode="HTML",
-                    thumbnail=None, 
+                    thumbnail=None, # Без обложки (для фикса квадрата)
                     supports_streaming=True, disable_notification=True
                 )
                 telegram_file_id = sent_msg.video.file_id
                 media_type = 'video'
-        except:
-            await bot.edit_message_caption(inline_message_id=inline_msg_id, caption="⚠️ Бот должен быть запущен в ЛС.")
+        except Exception as e:
+            print(f"Inline send error: {e}")
+            await bot.edit_message_caption(inline_message_id=inline_msg_id, caption="⚠️ Бот должен быть запущен в ЛС (напишите /start).")
             return
 
+        # 4. ЗАМЕНА ИНЛАЙНА
         if telegram_file_id:
             new_media = None
+            
             if media_type == 'audio' and is_music:
                 new_media = InputMediaAudio(media=telegram_file_id, caption=caption_text, parse_mode="HTML")
             elif media_type == 'video' and not is_music:
@@ -189,7 +279,7 @@ async def chosen_handler(chosen_result: types.ChosenInlineResult):
                     try: await bot.delete_message(user_id, sent_msg.message_id)
                     except: pass
             else:
-                await bot.edit_message_caption(inline_message_id=inline_msg_id, caption="✅ Файл в ЛС (смена типа).")
+                await bot.edit_message_caption(inline_message_id=inline_msg_id, caption="✅ Файл отправлен в ЛС (смена типа).")
 
     except Exception as e:
         print(f"Inline Error: {e}")

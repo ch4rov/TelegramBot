@@ -3,6 +3,7 @@ import shutil
 import json 
 import asyncio 
 import re
+import time
 from aiogram import F, types, Bot
 from aiogram.types import FSInputFile, InputMediaPhoto, InputMediaVideo, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.enums import ChatAction
@@ -47,7 +48,8 @@ async def handle_link(message: types.Message):
     caption_override = None
     if "|" in url_raw:
         parts = url_raw.split("|", 1)
-        url_raw, caption_override = parts[0].strip(), parts[1].strip()
+        url_raw = parts[0].strip()
+        caption_override = parts[1].strip()
     
     for c in [';', '\n', ' ', '$', '`', '|']: 
         if c in url_raw: url_raw = url_raw.split(c)[0]
@@ -57,6 +59,17 @@ async def handle_link(message: types.Message):
         if message.chat.type != "private": return
         await message.answer(msg.MSG_ERR_LINK)
         return
+    
+    # --- ОТКЛЮЧЕНИЕ ПЛЕЙЛИСТОВ SPOTIFY ---
+    # Если юзер кинул альбом или плейлист - просим трек
+    if "spotify" in url and ("/playlist/" in url or "/album/" in url):
+        await message.answer(
+            "⚠️ <b>Плейлисты и альбомы Spotify не поддерживаются.</b>\n"
+            "Пожалуйста, отправьте ссылку на конкретный трек.", 
+            parse_mode="HTML"
+        )
+        return
+    # -------------------------------------
 
     # 1. SMART CACHE
     db_cache = await get_cached_file(url)
@@ -85,9 +98,7 @@ async def handle_link(message: types.Message):
     await send_log("USER_REQ", f"<{url}>", user=user)
     status_msg = await message.answer("⏳")
 
-    # --- ИСПРАВЛЕНО: РАСПАКОВКА 4-Х ЗНАЧЕНИЙ ---
     files, folder_path, error, meta = await download_content(url)
-    # --------------------------------------------
 
     # ОБРАБОТКА ОШИБОК
     if error:
@@ -97,7 +108,6 @@ async def handle_link(message: types.Message):
             user_cookies = await get_user_cookie(user.id)
             if user_cookies:
                 await status_msg.edit_text("🔐 Доступ ограничен. Пробую куки...")
-                # Тут тоже 4 значения!
                 files, folder_path, error, meta = await download_content(url, {'user_cookie_content': user_cookies})
             else:
                 await message.answer("🔒 <b>Ошибка доступа.</b>\nПришлите файл <code>cookies.txt</code>.", parse_mode="HTML")
@@ -108,7 +118,6 @@ async def handle_link(message: types.Message):
         if error and ("too large" in err_str or "larger than" in err_str) and not settings.USE_LOCAL_SERVER:
             await status_msg.edit_text("⚠️ Файл > 50 МБ. Пробую сжать...")
             low_opts = {'format': 'worst[ext=mp4]+bestaudio[ext=m4a]/worst[ext=mp4]/worst', 'user_cookie_content': await get_user_cookie(user.id)}
-            # И тут 4 значения!
             files, folder_path, error, meta = await download_content(url, low_opts)
             if error: error = "Даже в низком качестве файл слишком большой (>50 МБ)."
         
@@ -118,26 +127,29 @@ async def handle_link(message: types.Message):
         if user.id in ACTIVE_DOWNLOADS: del ACTIVE_DOWNLOADS[user.id]
         return
         
-    # --- МЕТАДАННЫЕ ---
+    # МЕТАДАННЫЕ
     resolution_text = ""
     name_no_ext = ""
     vid_width, vid_height = None, None
-    
-    # Используем meta, если есть
-    meta_artist = None
-    meta_title = None
+    meta_artist, meta_title = None, None
 
     if meta:
-        # Размеры
         h, w = meta.get('height'), meta.get('width')
         if h and w:
             vid_height, vid_width = h, w
             res_str = "1080p" if h >= 1080 else f"{h}p"
             resolution_text = f" ({res_str})"
-        
-        # Имена
         meta_artist = meta.get('artist') or meta.get('uploader') or meta.get('creator') or meta.get('channel')
         meta_title = meta.get('track') or meta.get('title') or meta.get('alt_title')
+    else:
+        info_json_file = next((f for f in files if f.endswith(('.info.json'))), None)
+        if info_json_file:
+            try:
+                with open(info_json_file, 'r', encoding='utf-8') as f:
+                    info = json.load(f)
+                    meta_artist = info.get('artist') or info.get('uploader')
+                    meta_title = info.get('track') or info.get('title')
+            except: pass
 
     # 3. ОТПРАВКА
     action_task = None
@@ -161,36 +173,25 @@ async def handle_link(message: types.Message):
         target = media_files[0]
         ext = os.path.splitext(target)[1].lower()
 
-        # Если метаданных не было в словаре, пробуем чистить имя файла
         if not meta_title:
              fname = os.path.basename(target)
-             raw_filename = os.path.splitext(fname)[0]
-             clean_filename = re.sub(r'\[.*?\]', '', raw_filename).strip()
-             if "_" in clean_filename and " " not in clean_filename:
-                 clean_filename = clean_filename.replace("_", " ")
-             meta_title = clean_filename
+             raw = os.path.splitext(fname)[0]
+             meta_title = re.sub(r'\[.*?\]', '', raw).strip().replace("_", " ")
 
-        # Финальные данные
         final_artist = meta_artist
         final_title = meta_title
-
         if not final_artist and " - " in final_title:
             parts = final_title.split(" - ", 1)
-            final_artist = parts[0]
-            final_title = parts[1]
-        
-        if not final_artist:
-            final_artist = f"@{settings.BOT_USERNAME or 'ch4roff_bot'}"
+            final_artist, final_title = parts[0], parts[1]
+        if not final_artist: final_artist = f"@{settings.BOT_USERNAME or 'ch4roff_bot'}"
 
         caption_header = final_title
         if meta_artist and meta_artist not in final_title:
             caption_header = f"{meta_artist} - {final_title}"
             
         caption = make_caption(f"{caption_header}{resolution_text}", url, caption_override)
-        
         sent_msg, m_type = None, None 
 
-        # TikTok Carousel
         if is_tiktok_photo and len([f for f in media_files if f.endswith(tuple(image_exts))]) > 1:
             if not await get_module_status("TikTokPhotos"):
                  await message.answer(msg.MSG_DISABLE_MODULE)
@@ -210,7 +211,6 @@ async def handle_link(message: types.Message):
             await status_msg.delete()
             return
 
-        # Audio
         if ext in audio_exts:
             await message.bot.send_chat_action(chat_id=message.chat.id, action=ChatAction.UPLOAD_VOICE)
             thumb = next((f for f in files if f.endswith(('.jpg', '.png'))), None)
@@ -218,12 +218,10 @@ async def handle_link(message: types.Message):
             sent_msg = await message.answer_audio(
                 FSInputFile(target), caption=caption, parse_mode="HTML",
                 thumbnail=FSInputFile(thumb) if thumb else None,
-                performer=final_artist, title=final_title,
-                reply_markup=reply_markup
+                performer=final_artist, title=final_title, reply_markup=reply_markup
             )
             m_type = "audio"
 
-        # Video
         elif ext in video_exts:
             action_task = asyncio.create_task(send_action_loop(message.bot, message.chat.id, ChatAction.UPLOAD_VIDEO))
             sent_msg = await message.answer_video(
@@ -233,7 +231,6 @@ async def handle_link(message: types.Message):
             )
             m_type = "video"
         
-        # Photo
         else:
             sent_msg = await message.answer_photo(FSInputFile(target), caption=caption, parse_mode="HTML")
             m_type = "photo"
@@ -259,7 +256,6 @@ async def handle_link(message: types.Message):
         if ACTIVE_DOWNLOADS.get(user.id) > 0: ACTIVE_DOWNLOADS[user.id] -= 1
         if folder_path and os.path.exists(folder_path): shutil.rmtree(folder_path, ignore_errors=True)
 
-# ... (handle_plain_text без изменений) ...
 @user_router.message(F.text & ~F.text.contains("http"))
 async def handle_plain_text(message: types.Message):
     if message.chat.type != "private": return
@@ -285,11 +281,7 @@ async def handle_plain_text(message: types.Message):
 
     buttons = []
     for res in results:
-        uploader = res.get('uploader', '')
-        title = res.get('title', '')
-        full_title = f"{uploader} - {title}" if uploader else title
-        full_title = f"{full_title} ({res['duration']})"
-        
+        full_title = f"{res['title']} ({res['duration']})"
         if len(full_title) > 50: full_title = full_title[:47] + "..."
         source = res.get('source', 'YT')
         buttons.append([InlineKeyboardButton(text=full_title, callback_data=f"music:{source}:{res['id']}")])

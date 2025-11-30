@@ -38,7 +38,9 @@ URL_PATTERNS = [
     r'^https?://(www\.|m\.|music\.)?youtube\.com/.*',
     r'^https?://(www\.)?youtu\.be/.*',
     r'^https?://(www\.|m\.)?soundcloud\.com/.*',
-    r'^https?://(www\.|m\.|clips\.)?twitch\.tv/.*'
+    r'^https?://(www\.|m\.|clips\.)?twitch\.tv/.*',
+    r'^https?://(open\.)?spotify\.com/.*',
+    r'^https?://spotify\.link/.*',
 ]
 
 # --- СПИСОК КОМАНД ---
