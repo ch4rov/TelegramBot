@@ -1,5 +1,6 @@
 import os
 import sys
+import time
 import requests
 from aiogram import Bot, Dispatcher
 from aiogram.client.session.aiohttp import AiohttpSession
@@ -8,10 +9,8 @@ from dotenv import load_dotenv
 import settings
 
 load_dotenv()
+token = settings.BOT_TOKEN
 
-token = os.getenv('BOT_TOKEN')
-
-# Логируем режим при старте
 if settings.IS_TEST_ENV:
     print("⚠️  РЕЖИМ: ТЕСТОВЫЙ (Доступ ограничен)")
 else:
@@ -20,30 +19,43 @@ else:
 session = None
 
 if settings.USE_LOCAL_SERVER:
-    server_url = settings.LOCAL_SERVER_URL
-    print(f"🖥️  Сервер: ЛОКАЛЬНЫЙ (Docker) -> {server_url}")
+    print(f"🖥️  Проверка локального сервера ({settings.LOCAL_SERVER_URL})...")
     
-    # Проверка доступности
-    try:
-        requests.get(server_url, timeout=2)
-        print("✅  Связь с Docker есть.")
-    except Exception as e:
-        print(f"❌  Нет связи с Docker: {e}")
-        sys.exit(1)
+    server_available = False
+    
+    # --- ЛОГИКА ПОВТОРНЫХ ПОПЫТОК (RETRY) ---
+    # Пробуем 3 раза с паузой, чтобы дать серверу "прогреться"
+    for i in range(3):
+        try:
+            # Таймаут 10 секунд (достаточно даже для медленного HDD)
+            requests.get(f"{settings.LOCAL_SERVER_URL}", timeout=10)
+            server_available = True
+            break
+        except:
+            print(f"   ⏳ Попытка {i+1}/3 неудачна... ждем 2 сек...")
+            time.sleep(2)
+    # ----------------------------------------
 
-    # --- ВАЖНЫЙ ФИКС ---
-    # Мы используем TelegramAPIServer.from_base(...)
-    # Но нам нужно, чтобы aiogram НЕ пытался искать файлы на диске Windows,
-    # так как они лежат внутри Linux-контейнера.
-    # Поэтому мы создаем объект сервера вручную с правильным шаблоном.
-    
-    api_server = TelegramAPIServer(
-        base=f"{server_url}/bot{{token}}/{{method}}",
-        file=f"{server_url}/file/bot{{token}}/{{path}}",
-        is_local=False # <--- ЭТО РЕШАЕТ ОШИБКУ 404. Заставляет качать по HTTP.
-    )
-    
-    session = AiohttpSession(api=api_server)
+    if server_available:
+        print("✅  Связь с Docker есть. Работаем локально.")
+        # Создаем сессию с is_local=False (чтобы качать по HTTP, а не путям)
+        api_server = TelegramAPIServer(
+            base=f"{settings.LOCAL_SERVER_URL}/bot{{token}}/{{method}}",
+            file=f"{settings.LOCAL_SERVER_URL}/file/bot{{token}}/{{path}}",
+            is_local=False 
+        )
+        session = AiohttpSession(api=api_server)
+    else:
+        print("❌  Docker недоступен после 3 попыток.")
+        print("☁️  АВАРИЙНОЕ ПЕРЕКЛЮЧЕНИЕ НА ОБЛАКО.")
+        
+        # Ставим флаг аварии
+        with open(settings.FORCE_CLOUD_FILE, "w") as f: 
+            f.write("1")
+            
+        settings.USE_LOCAL_SERVER = False
+        settings.STARTUP_ERROR_MESSAGE = "🚨 <b>Сбой при старте!</b>\nЛокальный сервер не ответил на пинг (3 попытки).\nБот перешел на Облако."
+        session = None 
 else:
     print("☁️  Сервер: ОБЛАКО TELEGRAM")
 

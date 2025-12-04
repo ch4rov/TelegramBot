@@ -3,17 +3,28 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-BOT_VERSION = "2.5.3.1"
+BOT_VERSION = "2.5.4"
 
 # --- ТОКЕНЫ ---
 BOT_TOKEN = os.getenv("BOT_TOKEN")
+ADMIN_ID = os.getenv("ADMIN_ID")
 TEST_BOT_TOKEN = os.getenv("TEST_BOT_TOKEN")
 IS_TEST_ENV = (BOT_TOKEN == TEST_BOT_TOKEN) and (BOT_TOKEN is not None)
 
 # --- СЕРВЕР ---
-USE_LOCAL_SERVER = os.getenv("USE_LOCAL_SERVER", "False").lower() == "true"
-LOCAL_SERVER_URL = os.getenv("LOCAL_SERVER_URL", "http://localhost:8081")
+FORCE_CLOUD_FILE = ".force_cloud"
+IS_FORCED_CLOUD = os.path.exists(FORCE_CLOUD_FILE)
 
+if IS_FORCED_CLOUD:
+    USE_LOCAL_SERVER = False
+    LOCAL_SERVER_URL = None
+    # Сообщение для админа, которое отправится после рестарта
+    STARTUP_ERROR_MESSAGE = "⚠️ <b>Аварийный режим!</b>\nЛокальный сервер упал во время работы. Бот переведен на Cloud API."
+else:
+    # 2. Иначе берем настройки из .env
+    USE_LOCAL_SERVER = os.getenv("USE_LOCAL_SERVER", "False").lower() == "true"
+    LOCAL_SERVER_URL = os.getenv("LOCAL_SERVER_URL", "http://localhost:8081")
+    STARTUP_ERROR_MESSAGE = None
 # --- ЛИМИТЫ ---
 MAX_FILE_SIZE = 2000 * 1024 * 1024 if USE_LOCAL_SERVER else 50 * 1024 * 1024
 MAX_CONCURRENT_DOWNLOADS = 3
