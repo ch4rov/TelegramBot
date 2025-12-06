@@ -3,150 +3,137 @@ import json
 import time
 import os
 from aiogram import F, types
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import CommandStart, Command
 
 from .router import user_router, check_access_and_update
-from services.database_service import set_lastfm_username, save_user_cookie, get_module_status
+from services.database_service import set_lastfm_username, save_user_cookie, get_module_status, set_user_language
 from logs.logger import send_log
-import messages as msg 
+from languages import t
 import settings
 
 ADMIN_ID = os.getenv("ADMIN_ID")
 
 def convert_json_to_netscape(json_content: str) -> str:
+    # (Код конвертера без изменений, скопируй его или оставь)
     try:
         cookies = json.loads(json_content)
-        netscape_lines = ["# Netscape HTTP Cookie File"]
-        for cookie in cookies:
-            domain = cookie.get('domain', '')
-            if not domain.startswith('.') and domain.count('.') > 1: domain = '.' + domain
-            flag = "TRUE" if domain.startswith('.') else "FALSE"
-            path = cookie.get('path', '/')
-            secure = "TRUE" if cookie.get('secure') else "FALSE"
-            expiration = str(int(cookie.get('expirationDate', time.time() + 31536000)))
-            name, value = cookie.get('name', ''), cookie.get('value', '')
-            netscape_lines.append(f"{domain}\t{flag}\t{path}\t{secure}\t{expiration}\t{name}\t{value}")
-        return "\n".join(netscape_lines)
-    except Exception: return None
+        lines = ["# Netscape HTTP Cookie File"]
+        for c in cookies:
+            d = c.get('domain', ''); p = c.get('path', '/'); n = c.get('name', ''); v = c.get('value', '')
+            if not d.startswith('.') and d.count('.') > 1: d = '.' + d
+            f = "TRUE" if d.startswith('.') else "FALSE"; s = "TRUE" if c.get('secure') else "FALSE"
+            e = str(int(c.get('expirationDate', time.time() + 31536000)))
+            lines.append(f"{d}\t{f}\t{p}\t{s}\t{e}\t{n}\t{v}")
+        return "\n".join(lines)
+    except: return None
 
-async def build_start_message(bot_username: str) -> tuple[str, str]:
-    """
-    Генерирует два текста: список сервисов и инструкцию,
-    основываясь на статусе модулей в БД.
-    """
-    
-    # 1. СПИСОК СЕРВИСОВ
+async def build_services_list() -> str:
     services = []
-    if await get_module_status("YouTube"): services.append("📺 <b>YouTube</b>")
-    
-    tt_vid = await get_module_status("TikTokVideos")
-    tt_photo = await get_module_status("TikTokPhotos")
-    if tt_vid or tt_photo: services.append(f"🎵 <b>TikTok</b>")
-    
-    if await get_module_status("Instagram"): services.append("📸 <b>Instagram</b>")
-    if await get_module_status("VK"): services.append("🔵 <b>VK Video</b>")
-    if await get_module_status("SoundCloud"): services.append("☁️ <b>SoundCloud</b>")
-    if await get_module_status("Twitch"): services.append("👾 <b>Twitch</b>")
-    if await get_module_status("Spotify"): services.append("🎧 <b>Spotify</b>")
-    
-    services_text = ", ".join(services) if services else "❌ <i>Нет активных сервисов</i>"
-
-    # 2. ИНСТРУКЦИЯ (USAGE)
-    usage_lines = []
-    counter = 1
-
-    # -- Пункт 1: ЛС (Ссылки + Текст) --
-    text_find = await get_module_status("TextFind")
-    if text_find:
-        usage_lines.append(f"{counter}. <b>Личные сообщения:</b> Отправь ссылку на видео или название трека.")
-    else:
-        usage_lines.append(f"{counter}. <b>Личные сообщения:</b> Отправь ссылку на видео.")
-    counter += 1
-
-    # -- Пункт 2: Инлайн --
-    inline_aud = await get_module_status("InlineAudio")
-    inline_vid = await get_module_status("InlineVideo")
-    
-    if inline_aud or inline_vid:
-        inline_parts = []
-        if inline_aud:
-            inline_parts.append(f"<code>@{bot_username} песня</code> для поиска музыки")
-        if inline_vid:
-            inline_parts.append(f"<code>@{bot_username} ссылка</code> для отправки видео")
-            
-        joiner = " или " if (inline_aud and inline_vid) else ""
-        text = f"{counter}. <b>Инлайн:</b> Напиши {joiner.join(inline_parts)}."
-        usage_lines.append(text)
-        counter += 1
-
-    # -- Пункт 3: Видеосообщения --
-    if await get_module_status("TelegramVideo"):
-        usage_lines.append(f"{counter}. <b>Видео-сообщения:</b> Команда /videomessage для создания \"кружочков\".")
-
-    return services_text, "\n".join(usage_lines)
+    if await get_module_status("YouTube"): services.append("📺 YouTube")
+    tt = await get_module_status("TikTokVideos") or await get_module_status("TikTokPhotos")
+    if tt: services.append("🎵 TikTok")
+    if await get_module_status("Instagram"): services.append("📸 Instagram")
+    if await get_module_status("VK"): services.append("🔵 VK")
+    if await get_module_status("SoundCloud"): services.append("☁️ SoundCloud")
+    if await get_module_status("Twitch"): services.append("👾 Twitch")
+    if await get_module_status("Spotify"): services.append("🎧 Spotify")
+    if await get_module_status("YandexMusic"): services.append("🟡 Yandex Music")
+    if await get_module_status("AppleMusic"): services.append("🍎 Apple Music")
+    return ", ".join(services) if services else "❌"
 
 @user_router.message(CommandStart())
 async def cmd_start(message: types.Message):
-    can, is_new = await check_access_and_update(message.from_user, message)
+    # Получаем язык при проверке
+    can, is_new, _, lang = await check_access_and_update(message.from_user, message)
     if not can: return
     
+    user_id = message.from_user.id
     bot_info = await message.bot.get_me()
     
-    # Генерируем динамический текст
-    services_txt, usage_txt = await build_start_message(bot_info.username)
+    # 1. Приветствие
+    hello = await t(user_id, 'start_hello', name=html.escape(message.from_user.first_name))
     
-    welcome_text = msg.MSG_START.format(
-        name=html.escape(message.from_user.first_name),
-        services_text=services_txt,
-        usage_text=usage_txt
-    )
+    # 2. Сервисы
+    serv_list = await build_services_list()
     
-    await message.answer(welcome_text, parse_mode="HTML")
+    # 3. Меню
+    is_admin = str(user_id) == str(ADMIN_ID)
     
-    # Меню команд
-    is_admin_user = str(message.from_user.id) == str(ADMIN_ID)
-    text = "🤖 <b>Меню команд</b>\n\n"
-    def format_cmd(cmd, desc, copy):
-        return f"🔹 <code>/{cmd}</code> — {desc}\n" if copy else f"🔹 /{cmd} — {desc}\n"
+    # Функция для форматирования строки меню с переводом
+    async def fmt(key, desc_key, copy):
+        # Переводим описание команды!
+        translated_desc = await t(user_id, desc_key)
+        icon = "🔹"
+        if copy: return f"{icon} <code>/{key}</code> — {translated_desc}\n"
+        return f"{icon} /{key} — {translated_desc}\n"
 
-    text += "👤 <b>Для всех:</b>\n"
-    for cmd, desc, cat, copy in settings.BOT_COMMANDS_LIST:
-        if cat == "user": text += format_cmd(cmd, desc, copy)
+    menu_txt = f"{hello}\n\n🚀 <b>Services:</b>\n{serv_list}\n\n🤖 <b>Menu:</b>\n"
     
-    # Добавляем кнопку кружочков в меню, только если модуль включен
+    # Перебираем команды
+    for key, desc_key, cat, copy in settings.BOT_COMMANDS_LIST:
+        if cat == "user":
+            menu_txt += await fmt(key, desc_key, copy)
+            
     if await get_module_status("TelegramVideo"):
-        text += "🔹 /videomessage — Сделать кружочек\n"
+        vn_desc = await t(user_id, 'cmd_videomessage')
+        menu_txt += f"🔹 /videomessage — {vn_desc}\n"
 
-    if is_admin_user:
-        text += "\n🛡 <b>Админ:</b>\n"
-        for cmd, desc, cat, copy in settings.BOT_COMMANDS_LIST:
-            if cat.startswith("admin"): text += format_cmd(cmd, desc, copy).replace("🔹", "🔸")
+    if is_admin:
+        menu_txt += await t(user_id, 'menu_admin_mod') # Заголовок админки
+        for key, desc_key, cat, copy in settings.BOT_COMMANDS_LIST:
+            if cat == "admin_mod":
+                line = await fmt(key, desc_key, copy)
+                menu_txt += line.replace("🔹", "🔸")
+                
+        menu_txt += await t(user_id, 'menu_admin_tech')
+        for key, desc_key, cat, copy in settings.BOT_COMMANDS_LIST:
+            if cat == "admin_tech":
+                line = await fmt(key, desc_key, copy)
+                menu_txt += line.replace("🔹", "🔧")
 
-    await message.answer(text, parse_mode="HTML")
-
-    if is_new:
-        await send_log("NEW_USER", f"New: {message.from_user.full_name}", user=message.from_user)
+    await message.answer(menu_txt, parse_mode="HTML")
+    if is_new: await send_log("NEW_USER", f"New: {message.from_user.full_name}", user=message.from_user)
 
 @user_router.message(Command("menu"))
-async def cmd_menu(message: types.Message):
-    await cmd_start(message)
+async def cmd_menu(message: types.Message): await cmd_start(message)
 
 @user_router.message(Command("login"))
 async def cmd_login(message: types.Message):
-    can, _ = await check_access_and_update(message.from_user, message)
+    can, _, _, _ = await check_access_and_update(message.from_user, message)
     if not can: return
     parts = message.text.split()
     if len(parts) < 2:
-        await message.answer("🔑 <b>Авторизация Last.fm</b>\nУкажите ник:\n<code>/login ваш_ник</code>", parse_mode="HTML")
+        await message.answer("🔑 <code>/login username</code>", parse_mode="HTML")
         return
-    lfm_username = parts[1]
-    await set_lastfm_username(message.from_user.id, lfm_username)
-    await message.answer(f"✅ Профиль <b>{lfm_username}</b> привязан!", parse_mode="HTML")
+    await set_lastfm_username(message.from_user.id, parts[1])
+    await message.answer(f"✅ OK: <b>{parts[1]}</b>", parse_mode="HTML")
 
+@user_router.message(Command("language"))
+async def cmd_lang(message: types.Message):
+    can, _, _, lang = await check_access_and_update(message.from_user, message)
+    if not can: return
+    txt = await t(message.from_user.id, 'language_select')
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🇺🇸 English", callback_data="lang:en"),
+         InlineKeyboardButton(text="🇷🇺 Русский", callback_data="lang:ru")],
+        [InlineKeyboardButton(text="🇵🇱 Polski", callback_data="lang:pl")]
+    ])
+    await message.answer(txt, reply_markup=kb, parse_mode="HTML")
+
+@user_router.callback_query(F.data.startswith("lang:"))
+async def lang_cb(callback: types.CallbackQuery):
+    code = callback.data.split(":")[1]
+    await set_user_language(callback.from_user.id, code)
+    txt = await t(callback.from_user.id, 'language_set')
+    await callback.message.edit_text(txt, parse_mode="HTML")
+
+# --- COOKIES ---
 @user_router.message(F.document)
 async def handle_document(message: types.Message):
     if message.document.file_name and message.document.file_name.lower() == "cookies.txt":
-        can, _ = await check_access_and_update(message.from_user, message)
+        # FIXED UNPACKING
+        can, _, _, _ = await check_access_and_update(message.from_user, message)
         if not can: return
         file = await message.bot.get_file(message.document.file_id)
         
@@ -161,5 +148,7 @@ async def handle_document(message: types.Message):
             if converted: content = converted
             
         await save_user_cookie(message.from_user.id, content)
-        await message.answer("🍪 <b>Куки сохранены!</b>", parse_mode="HTML")
+        
+        txt = await t(message.from_user.id, 'cookies_saved')
+        await message.answer(txt, parse_mode="HTML")
         await send_log("INFO", f"User uploaded cookies", user=message.from_user)

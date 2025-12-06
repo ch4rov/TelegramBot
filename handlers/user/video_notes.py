@@ -16,7 +16,7 @@ import messages as msg
 
 @user_router.message(Command("videomessage"))
 async def cmd_videomessage(message: types.Message, state: FSMContext):
-    can, _ = await check_access_and_update(message.from_user, message)
+    can, _, _, _ = await check_access_and_update(user, message)
     if not can: return
     
     if not VIDEO_NOTE_ENABLED:

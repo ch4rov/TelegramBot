@@ -4,20 +4,56 @@ import json
 import asyncio 
 import re
 import time
+import html # <--- ИМПОРТ HTML
 from aiogram import F, types, Bot
 from aiogram.types import FSInputFile, InputMediaPhoto, InputMediaVideo, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.enums import ChatAction
 
-from .router import user_router, check_access_and_update, make_caption, ACTIVE_DOWNLOADS
+from .router import user_router, check_access_and_update, ACTIVE_DOWNLOADS
 from services.database_service import get_cached_file, save_cached_file, get_user_cookie, get_module_status
 from logs.logger import send_log_groupable as send_log, log_other_message
 from services.platforms.platform_manager import download_content, is_valid_url
 from services.url_cleaner import clean_url
 from services.search_service import search_youtube
+from services.platforms.SpotifyDownloader.spotify_strategy import SpotifyStrategy
+from languages import t # <--- ИМПОРТ ЯЗЫКОВ
 import messages as msg 
 import settings
 
-def get_clip_keyboard(url: str):
+# Кэш плейлистов
+from uuid import uuid4
+import math
+PLAYLIST_CACHE = {}
+
+def make_caption(title_text, url, override=None, is_audio=False):
+    """
+    Формирует подпись с поддержкой Odesli и мультиязычностью.
+    (Асинхронная версия не нужна, так как тексты статичны, кроме перевода кнопки)
+    """
+    bot_name = settings.BOT_USERNAME or "ch4roff_bot"
+    bot_link = f"@{bot_name}"
+    
+    platforms_link = ""
+    if is_audio and url:
+        clean_source = url.split("?")[0] if "?" in url else url
+        odesli_url = f"https://song.link/{clean_source}"
+        # Для простоты пока хардкодим "Links" или можно передать переведенный текст
+        # Но чтобы не усложнять сигнатуру, оставим универсальное "Links" или иконку
+        platforms_link = f" | <a href=\"{odesli_url}\">🌐 Links</a>"
+
+    footer = f"{bot_link}{platforms_link}"
+
+    if override:
+        return f"{html.escape(override)}\n\n{footer}"
+    
+    if not title_text:
+        return footer
+    
+    safe_title = html.escape(title_text)
+    return f'<a href="{url}">{safe_title}</a>\n\n{footer}'
+
+def get_clip_keyboard(url: str, user_id: int):
+    # Добавляем user_id для перевода кнопки в будущем
     if "music.youtube.com" in url or "youtu" in url:
         video_id = None
         if "v=" in url: 
@@ -27,7 +63,8 @@ def get_clip_keyboard(url: str):
             try: video_id = url.split("youtu.be/")[1].split("?")[0]
             except: pass
         if video_id:
-            return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🎬 Загрузить клип", callback_data=f"get_clip:{video_id}")]])
+            # Текст кнопки можно перевести через await t(), но здесь синхронная функция
+            return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🎬 Video / Clip", callback_data=f"get_clip:{video_id}")]])
     return None
 
 async def send_action_loop(bot: Bot, chat_id: int, action: ChatAction, delay: int = 5):
@@ -37,19 +74,88 @@ async def send_action_loop(bot: Bot, chat_id: int, action: ChatAction, delay: in
             await asyncio.sleep(delay)
     except asyncio.CancelledError: pass
 
+# --- ПЛЕЙЛИСТЫ ---
+def generate_playlist_keyboard(playlist_id, page=0):
+    data = PLAYLIST_CACHE.get(playlist_id)
+    if not data: return None
+    tracks = data['tracks']
+    ITEMS_PER_PAGE = 5
+    total_pages = math.ceil(len(tracks) / ITEMS_PER_PAGE)
+    start = page * ITEMS_PER_PAGE
+    end = start + ITEMS_PER_PAGE
+    current_tracks = tracks[start:end]
+    buttons = []
+    for track_name in current_tracks:
+        cb_data = f"sp_dl:{track_name[:40]}"
+        buttons.append([InlineKeyboardButton(text=f"🎵 {track_name[:30]}", callback_data=cb_data)])
+    nav_row = []
+    if page > 0: nav_row.append(InlineKeyboardButton(text="⬅️", callback_data=f"sp_nav:{playlist_id}:{page-1}"))
+    nav_row.append(InlineKeyboardButton(text=f"{page+1}/{total_pages}", callback_data="ignore"))
+    if page < total_pages - 1: nav_row.append(InlineKeyboardButton(text="➡️", callback_data=f"sp_nav:{playlist_id}:{page+1}"))
+    buttons.append(nav_row)
+    buttons.append([InlineKeyboardButton(text="❌ Close", callback_data="delete_msg")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+@user_router.callback_query(F.data.startswith("sp_nav:"))
+async def handle_playlist_nav(callback: types.CallbackQuery):
+    try:
+        _, playlist_id, page_str = callback.data.split(":")
+        page = int(page_str)
+        keyboard = generate_playlist_keyboard(playlist_id, page)
+        if not keyboard:
+            await callback.answer("⚠️ Menu expired", show_alert=True)
+            return
+        await callback.message.edit_reply_markup(reply_markup=keyboard)
+    except: await callback.answer()
+
+@user_router.callback_query(F.data.startswith("sp_dl:"))
+async def handle_playlist_download(callback: types.CallbackQuery):
+    track_name = callback.data.split(":", 1)[1]
+    await callback.answer(f"🔍 {track_name}")
+    from handlers.search_handler import handle_music_selection
+    from copy import copy
+    results = await search_youtube(f"{track_name} audio", limit=1)
+    if not results:
+        await callback.message.answer("❌ Track not found.")
+        return
+    new_callback = copy(callback)
+    new_callback.data = f"music:YT:{results[0]['id']}"
+    await handle_music_selection(new_callback)
+
+async def show_spotify_playlist_ui(message, url):
+    if not await get_module_status("Spotify"):
+         await message.answer(msg.MSG_DISABLE_MODULE)
+         return
+    status_msg = await message.answer("⏳ Scanning playlist...")
+    try:
+        strategy = SpotifyStrategy(url)
+        playlist_info = await strategy.get_playlist_tracks()
+        if not playlist_info:
+            await status_msg.edit_text("❌ Failed to read playlist.")
+            return
+        title, tracks = playlist_info
+        if not tracks:
+            await status_msg.edit_text("📂 Playlist is empty.")
+            return
+        p_id = str(uuid4())
+        PLAYLIST_CACHE[p_id] = {'title': title, 'tracks': tracks}
+        keyboard = generate_playlist_keyboard(p_id, 0)
+        await status_msg.edit_text(f"📂 <b>Spotify Playlist</b>\n🎶 <b>{title}</b>\n🔢 Tracks: {len(tracks)}\n", reply_markup=keyboard, parse_mode="HTML")
+    except Exception as e: await status_msg.edit_text(f"❌ Error: {e}")
+
 # --- ОБРАБОТКА ССЫЛОК ---
 @user_router.message(F.text.contains("http"))
 async def handle_link(message: types.Message):
     user = message.from_user
-    can, _ = await check_access_and_update(user, message)
+    # Получаем язык
+    can, _, _, lang = await check_access_and_update(user, message)
     if not can: return
     
     url_raw = message.text.strip()
     caption_override = None
     if "|" in url_raw:
         parts = url_raw.split("|", 1)
-        url_raw = parts[0].strip()
-        caption_override = parts[1].strip()
+        url_raw, caption_override = parts[0].strip(), parts[1].strip()
     
     for c in [';', '\n', ' ', '$', '`', '|']: 
         if c in url_raw: url_raw = url_raw.split(c)[0]
@@ -57,27 +163,22 @@ async def handle_link(message: types.Message):
 
     if not is_valid_url(url):
         if message.chat.type != "private": return
-        await message.answer(msg.MSG_ERR_LINK)
+        await message.answer(await t(user.id, 'error_link'))
         return
-    
-    # --- ОТКЛЮЧЕНИЕ ПЛЕЙЛИСТОВ SPOTIFY ---
-    # Если юзер кинул альбом или плейлист - просим трек
+
+    # ПЛЕЙЛИСТ SPOTIFY
     if "spotify" in url and ("/playlist/" in url or "/album/" in url):
-        await message.answer(
-            "⚠️ <b>Плейлисты и альбомы Spotify не поддерживаются.</b>\n"
-            "Пожалуйста, отправьте ссылку на конкретный трек.", 
-            parse_mode="HTML"
-        )
+        await show_spotify_playlist_ui(message, url)
         return
-    # -------------------------------------
 
     # 1. SMART CACHE
     db_cache = await get_cached_file(url)
     if db_cache:
         try:
-            caption = make_caption(db_cache['title'], url, caption_override)
+            is_audio_cache = db_cache['media_type'] == 'audio'
+            caption = make_caption(db_cache['title'], url, caption_override, is_audio=is_audio_cache)
             reply_markup = None
-            if db_cache['media_type'] == 'audio': reply_markup = get_clip_keyboard(url)
+            if is_audio_cache: reply_markup = get_clip_keyboard(url, user.id)
 
             if db_cache['media_type'] == 'video': 
                 await message.answer_video(db_cache['file_id'], caption=caption, parse_mode="HTML")
@@ -85,44 +186,53 @@ async def handle_link(message: types.Message):
                 await message.answer_audio(db_cache['file_id'], caption=caption, parse_mode="HTML", reply_markup=reply_markup)
             elif db_cache['media_type'] == 'photo': 
                 await message.answer_photo(db_cache['file_id'], caption=caption, parse_mode="HTML")
-            await send_log("SUCCESS", f"Успешно [DB CACHE] (<{url}>)", user=user)
+            await send_log("SUCCESS", f"Cache Hit: {url}", user=user)
             return
         except: pass
 
     # 2. ЗАГРУЗКА
     if ACTIVE_DOWNLOADS.get(user.id, 0) >= settings.MAX_CONCURRENT_DOWNLOADS:
-        await message.answer("⚠️ Слишком много загрузок.")
+        await message.answer("⚠️ Queue full.")
         return
     ACTIVE_DOWNLOADS[user.id] = ACTIVE_DOWNLOADS.get(user.id, 0) + 1
     
-    await send_log("USER_REQ", f"<{url}>", user=user)
-    status_msg = await message.answer("⏳")
+    await send_log("USER_REQ", f"URL: {url}", user=user)
+    status_msg = await message.answer(await t(user.id, 'wait'))
 
+    # --- РАСПАКОВКА 4-Х ЗНАЧЕНИЙ ---
     files, folder_path, error, meta = await download_content(url)
 
-    # ОБРАБОТКА ОШИБОК
+    # ОБРАБОТКА ПЛЕЙЛИСТА
+    if error and "IS_SPOTIFY_PLAYLIST" in str(error):
+        await status_msg.delete()
+        if user.id in ACTIVE_DOWNLOADS: del ACTIVE_DOWNLOADS[user.id]
+        if folder_path: shutil.rmtree(folder_path, ignore_errors=True)
+        await show_spotify_playlist_ui(message, url)
+        return
+
+    # ОШИБКИ
     if error:
         err_str = str(error).lower()
-        auth_markers = ["sign in", "login", "private", "access", "blocked", "followers", "confirm", "captcha", "unsupported url"]
-        if any(m in err_str for m in auth_markers):
+        if any(m in err_str for m in ["sign in", "login", "private", "access", "blocked", "followers", "confirm", "captcha", "unsupported url"]):
             user_cookies = await get_user_cookie(user.id)
             if user_cookies:
-                await status_msg.edit_text("🔐 Доступ ограничен. Пробую куки...")
+                await status_msg.edit_text("🔐 Using cookies...")
                 files, folder_path, error, meta = await download_content(url, {'user_cookie_content': user_cookies})
             else:
-                await message.answer("🔒 <b>Ошибка доступа.</b>\nПришлите файл <code>cookies.txt</code>.", parse_mode="HTML")
+                txt = await t(user.id, 'auth_required')
+                await message.answer(txt, parse_mode="HTML")
                 await status_msg.delete()
                 if user.id in ACTIVE_DOWNLOADS: del ACTIVE_DOWNLOADS[user.id]
                 return
 
         if error and ("too large" in err_str or "larger than" in err_str) and not settings.USE_LOCAL_SERVER:
-            await status_msg.edit_text("⚠️ Файл > 50 МБ. Пробую сжать...")
+            await status_msg.edit_text("⚠️ >50 MB. Compressing...")
             low_opts = {'format': 'worst[ext=mp4]+bestaudio[ext=m4a]/worst[ext=mp4]/worst', 'user_cookie_content': await get_user_cookie(user.id)}
             files, folder_path, error, meta = await download_content(url, low_opts)
-            if error: error = "Даже в низком качестве файл слишком большой (>50 МБ)."
-        
+    
     if error:
-        await status_msg.edit_text(f"⚠️ {error}")
+        txt = await t(user.id, 'error', error=error)
+        await status_msg.edit_text(txt)
         await send_log("FAIL", f"Fail: {error}", user=user)
         if user.id in ACTIVE_DOWNLOADS: del ACTIVE_DOWNLOADS[user.id]
         return
@@ -139,8 +249,8 @@ async def handle_link(message: types.Message):
             vid_height, vid_width = h, w
             res_str = "1080p" if h >= 1080 else f"{h}p"
             resolution_text = f" ({res_str})"
-        meta_artist = meta.get('artist') or meta.get('uploader') or meta.get('creator') or meta.get('channel')
-        meta_title = meta.get('track') or meta.get('title') or meta.get('alt_title')
+        meta_artist = meta.get('artist') or meta.get('uploader')
+        meta_title = meta.get('track') or meta.get('title')
     else:
         info_json_file = next((f for f in files if f.endswith(('.info.json'))), None)
         if info_json_file:
@@ -173,6 +283,7 @@ async def handle_link(message: types.Message):
         target = media_files[0]
         ext = os.path.splitext(target)[1].lower()
 
+        # Формируем имя
         if not meta_title:
              fname = os.path.basename(target)
              raw = os.path.splitext(fname)[0]
@@ -189,12 +300,15 @@ async def handle_link(message: types.Message):
         if meta_artist and meta_artist not in final_title:
             caption_header = f"{meta_artist} - {final_title}"
             
-        caption = make_caption(f"{caption_header}{resolution_text}", url, caption_override)
+        # Формируем подпись с Odesli
+        is_audio_file = ext in audio_exts
+        caption = make_caption(f"{caption_header}{resolution_text}", url, caption_override, is_audio=is_audio_file)
+        
         sent_msg, m_type = None, None 
 
         if is_tiktok_photo and len([f for f in media_files if f.endswith(tuple(image_exts))]) > 1:
             if not await get_module_status("TikTokPhotos"):
-                 await message.answer(msg.MSG_DISABLE_MODULE)
+                 await message.answer(await t(user.id, 'module_disabled'))
                  await status_msg.delete()
                  return
             await message.bot.send_chat_action(chat_id=message.chat.id, action=ChatAction.UPLOAD_PHOTO)
@@ -205,16 +319,17 @@ async def handle_link(message: types.Message):
                 media_group.append(InputMediaPhoto(media=FSInputFile(img), caption=cap, parse_mode="HTML"))
             await message.answer_media_group(media_group)
             audio_f = next((f for f in files if f.endswith(tuple(audio_exts))), None)
-            bot_name = settings.BOT_USERNAME or "ch4roff_bot"
-            if audio_f: await message.answer_audio(FSInputFile(audio_f), caption="🎵 Sound", performer=f"@{bot_name}")
-            await send_log("SUCCESS", f"TikTok Carousel (<{url}>)", user=user)
+            if audio_f: 
+                bot_name = settings.BOT_USERNAME or "ch4roff_bot"
+                await message.answer_audio(FSInputFile(audio_f), caption="🎵 Sound", performer=f"@{bot_name}")
+            await send_log("SUCCESS", f"TikTok Carousel: {url}", user=user)
             await status_msg.delete()
             return
 
         if ext in audio_exts:
             await message.bot.send_chat_action(chat_id=message.chat.id, action=ChatAction.UPLOAD_VOICE)
             thumb = next((f for f in files if f.endswith(('.jpg', '.png'))), None)
-            reply_markup = get_clip_keyboard(url)
+            reply_markup = get_clip_keyboard(url, user.id)
             sent_msg = await message.answer_audio(
                 FSInputFile(target), caption=caption, parse_mode="HTML",
                 thumbnail=FSInputFile(thumb) if thumb else None,
@@ -235,7 +350,7 @@ async def handle_link(message: types.Message):
             sent_msg = await message.answer_photo(FSInputFile(target), caption=caption, parse_mode="HTML")
             m_type = "photo"
 
-        await send_log("SUCCESS", f"Успешно (<{url}>)", user=user)
+        await send_log("SUCCESS", f"Success: {url}", user=user)
         
         if sent_msg and m_type:
             fid = None
@@ -249,7 +364,7 @@ async def handle_link(message: types.Message):
     except Exception as e:
         if "Request timeout error" in str(e): await send_log("WARN", f"Timeout: {e}", user=user)
         else:
-            await message.answer(f"⚠️ Ошибка отправки файла. {e}")
+            await message.answer(f"⚠️ Error: {e}")
             await send_log("FAIL", f"Send Error: {e}", user=user)
     finally:
         if action_task: action_task.cancel()
@@ -269,22 +384,27 @@ async def handle_plain_text(message: types.Message):
     except: pass
 
     if not await get_module_status("TextFind"):
-        await message.answer(msg.MSG_DISABLE_MODULE)
+        await message.answer(await t(user.id, 'module_disabled'))
         return
 
     await message.bot.send_chat_action(chat_id=message.chat.id, action=ChatAction.TYPING)
     results = await search_youtube(txt, limit=5)
     
     if not results:
-        await message.answer(f"🔍 Ничего не найдено: {txt}")
+        await message.answer(await t(user.id, 'nothing_found'))
         return
 
     buttons = []
     for res in results:
-        full_title = f"{res['title']} ({res['duration']})"
-        if len(full_title) > 50: full_title = full_title[:47] + "..."
+        uploader = res.get('uploader', '')
+        title = res.get('title', '')
+        full_title = f"{uploader} - {title}" if uploader else title
+        full_title = f"{full_title} ({res['duration']})"
         source = res.get('source', 'YT')
         buttons.append([InlineKeyboardButton(text=full_title, callback_data=f"music:{source}:{res['id']}")])
     
-    buttons.append([InlineKeyboardButton(text="❌ Закрыть", callback_data="delete_msg")])
-    await message.answer(f"🔎 <b>Поиск:</b>\n<code>{txt}</code>", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons), parse_mode="HTML")
+    close_txt = await t(user.id, 'btn_close')
+    buttons.append([InlineKeyboardButton(text=close_txt, callback_data="delete_msg")])
+    
+    search_txt = await t(user.id, 'search_title', query=txt)
+    await message.answer(search_txt, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons), parse_mode="HTML")

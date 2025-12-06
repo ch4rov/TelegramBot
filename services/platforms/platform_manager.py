@@ -13,6 +13,10 @@ from .InstagramDownloader.instagram_strategy import InstagramStrategy
 from .SoundCloudDownloader.soundcloud_strategy import SoundCloudStrategy
 from .TwitchDownloader.twitch_strategy import TwitchStrategy 
 from .SpotifyDownloader.spotify_strategy import SpotifyStrategy
+# --- НОВЫЕ ИМПОРТЫ ---
+from .YandexDownloader.yandex_strategy import YandexStrategy
+from .AppleDownloader.apple_strategy import AppleStrategy
+# ---------------------
 from .common_downloader import CommonDownloader
 
 def is_valid_url(url: str) -> bool:
@@ -73,11 +77,20 @@ async def route_download(url: str, custom_opts: dict = None):
         downloader = TwitchStrategy(url)
         module_key = "Twitch"
 
-    # --- SPOTIFY (ИСПРАВЛЕНО) ---
-    # Ловим любые ссылки на spotify.com или сокращенные spotify.link
-    elif "spotify.com" in url or "spotify.link" in url: 
+    # --- SPOTIFY ---
+    elif "spotify.com" in url or "spotify.link" in url or "spotify.com" in url:
         downloader = SpotifyStrategy(url)
         module_key = "Spotify"
+
+    # --- YANDEX (НОВОЕ) ---
+    elif "music.yandex" in url:
+        downloader = YandexStrategy(url)
+        module_key = "YandexMusic"
+
+    # --- APPLE (НОВОЕ) ---
+    elif "music.apple.com" in url:
+        downloader = AppleStrategy(url)
+        module_key = "AppleMusic"
 
     # --- ПРОВЕРКА СТАТУСА ---
     if module_key:

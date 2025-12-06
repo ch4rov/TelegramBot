@@ -12,6 +12,7 @@ from aiogram import types, F
 from aiogram.types import BotCommand, BotCommandScopeDefault, BotCommandScopeChat
 from aiogram.dispatcher.middlewares.base import BaseMiddleware
 from aiogram.exceptions import TelegramNetworkError
+from languages import LANGUAGES
 import settings 
 
 from handlers import user, admin, inline_handler, search_handler
@@ -56,8 +57,10 @@ def clean_downloads_on_startup():
 async def set_ui_commands(bot):
     user_commands = []
     admin_commands = []
-    for cmd, desc, cat, copy in settings.BOT_COMMANDS_LIST:
-        command = BotCommand(command=cmd, description=desc)
+    en_strings = LANGUAGES.get('en', {})
+    for key, desc_key, cat, copy in settings.BOT_COMMANDS_LIST:
+        desc = en_strings.get(desc_key, desc_key)
+        command = BotCommand(command=key, description=desc)
         if cat == "user":
             user_commands.append(command)
             admin_commands.append(command)

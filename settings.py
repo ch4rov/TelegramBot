@@ -3,7 +3,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-BOT_VERSION = "2.5.4"
+BOT_VERSION = "2.5.5"
 
 # --- ТОКЕНЫ ---
 BOT_TOKEN = os.getenv("BOT_TOKEN")
@@ -53,26 +53,36 @@ URL_PATTERNS = [
     r'^https?://(www\.|m\.)?soundcloud\.com/.*',
     r'^https?://(www\.|m\.|clips\.)?twitch\.tv/.*',
     r'^https?://(open\.)?spotify\.com/.*',
+    r'.*googleusercontent\.com/spotify\.com/.*',
     r'^https?://spotify\.link/.*',
+    r'^https?://music\.yandex\.[a-z]{2,3}/.*',
+    r'^https?://(geo\.)?music\.apple\.com/.*',
 ]
 
 # --- СПИСОК КОМАНД ---
 BOT_COMMANDS_LIST = [
-    ("start", "Перезапустить бота", "user", False),
-    ("login", "Привязать Last.fm", "user", True),
-    ("users", "Список пользователей", "admin_mod", False),
-    ("ban", "Бан (нажми и введи ID)", "admin_mod", True),
-    ("unban", "Разбан (нажми и введи ID)", "admin_mod", True),
-    ("answer", "Ответ (нажми и введи ID)", "admin_mod", True),
-    ("status", "Состояние системы", "admin_tech", False),
-    ("check", "Health Check", "admin_tech", False),
-    ("update", "Обновить с GitHub", "admin_tech", False),
-    ("clearcache", "Очистить кэш файлов", "admin_tech", False),
-    ("fix_ffmpeg", "Переустановить FFmpeg", "admin_tech", False),
-    ("get_placeholder", "ID видео-заглушки", "admin_tech", False),
-    ("get_audio_placeholder", "ID аудио-заглушки", "admin_tech", False),
-    ("modules", "Управление модулями", "admin_tech", False),
-    ("exec", "Python Console", "admin_tech", True),
+    # Пользователь
+    ("start", "cmd_start", "user", False),
+    ("login", "cmd_login", "user", True),
+    ("language", "cmd_language", "user", False),
+    
+    # Админ - Модерация
+    ("users", "cmd_users", "admin_mod", False),
+    ("ban", "cmd_ban", "admin_mod", True),
+    ("unban", "cmd_unban", "admin_mod", True),
+    ("answer", "cmd_answer", "admin_mod", True),
+    
+    # Админ - Техническое
+    ("status", "cmd_status", "admin_tech", False),
+    ("check", "cmd_check", "admin_tech", False),
+    ("update", "cmd_update", "admin_tech", False),
+    ("clearcache", "cmd_clearcache", "admin_tech", False),
+    ("fix_ffmpeg", "cmd_fix_ffmpeg", "admin_tech", False),
+    ("get_placeholder", "cmd_get_placeholder", "admin_tech", False),
+    ("get_audio_placeholder", "cmd_get_audio_placeholder", "admin_tech", False),
+    ("modules", "cmd_modules", "admin_tech", False),
+    ("return_local", "cmd_return_local", "admin_tech", False),
+    ("exec", "cmd_exec", "admin_tech", True),
 ]
 
 # --- МОДУЛИ (Вкл/Выкл) ---
@@ -81,7 +91,8 @@ MODULES_LIST = [
     "YouTube", "YouTubeMusic", "Instagram", 
     "TikTokVideos", "TikTokPhotos", "TelegramVideo", 
     "Twitch", "VK", "SoundCloud", "Spotify",
-    "InlineVideo", "InlineAudio", "TextFind"
+    "InlineVideo", "InlineAudio", "TextFind",
+    "YandexMusic", "AppleMusic"
 ]
 
 # Имя бота (заполнится автоматически)
