@@ -4,31 +4,31 @@ import json
 import asyncio 
 import re
 import time
-import html # <--- ИМПОРТ HTML
+import html
 from aiogram import F, types, Bot
 from aiogram.types import FSInputFile, InputMediaPhoto, InputMediaVideo, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.enums import ChatAction
+from aiogram.exceptions import TelegramBadRequest
 
 from .router import user_router, check_access_and_update, ACTIVE_DOWNLOADS
 from services.database_service import get_cached_file, save_cached_file, get_user_cookie, get_module_status
 from logs.logger import send_log_groupable as send_log, log_other_message
 from services.platforms.platform_manager import download_content, is_valid_url
+from services.platforms.SpotifyDownloader.spotify_strategy import SpotifyStrategy
 from services.url_cleaner import clean_url
 from services.search_service import search_youtube
-from services.platforms.SpotifyDownloader.spotify_strategy import SpotifyStrategy
-from languages import t # <--- ИМПОРТ ЯЗЫКОВ
+from languages import t
 import messages as msg 
 import settings
 
-# Кэш плейлистов
+# --- КЭШ ПЛЕЙЛИСТОВ ---
 from uuid import uuid4
 import math
 PLAYLIST_CACHE = {}
 
-def make_caption(title_text, url, override=None, is_audio=False):
+def make_caption(title_text, url, override=None, is_audio=False, request_by=None):
     """
-    Формирует подпись с поддержкой Odesli и мультиязычностью.
-    (Асинхронная версия не нужна, так как тексты статичны, кроме перевода кнопки)
+    Формирует подпись с поддержкой Odesli и тегом запросившего (если это репост/восстановление).
     """
     bot_name = settings.BOT_USERNAME or "ch4roff_bot"
     bot_link = f"@{bot_name}"
@@ -37,11 +37,13 @@ def make_caption(title_text, url, override=None, is_audio=False):
     if is_audio and url:
         clean_source = url.split("?")[0] if "?" in url else url
         odesli_url = f"https://song.link/{clean_source}"
-        # Для простоты пока хардкодим "Links" или можно передать переведенный текст
-        # Но чтобы не усложнять сигнатуру, оставим универсальное "Links" или иконку
         platforms_link = f" | <a href=\"{odesli_url}\">🌐 Links</a>"
 
-    footer = f"{bot_link}{platforms_link}"
+    footer_parts = [bot_link, platforms_link]
+    if request_by:
+        footer_parts.append(f"\n{request_by}")
+        
+    footer = "".join(footer_parts)
 
     if override:
         return f"{html.escape(override)}\n\n{footer}"
@@ -53,7 +55,6 @@ def make_caption(title_text, url, override=None, is_audio=False):
     return f'<a href="{url}">{safe_title}</a>\n\n{footer}'
 
 def get_clip_keyboard(url: str, user_id: int):
-    # Добавляем user_id для перевода кнопки в будущем
     if "music.youtube.com" in url or "youtu" in url:
         video_id = None
         if "v=" in url: 
@@ -63,7 +64,6 @@ def get_clip_keyboard(url: str, user_id: int):
             try: video_id = url.split("youtu.be/")[1].split("?")[0]
             except: pass
         if video_id:
-            # Текст кнопки можно перевести через await t(), но здесь синхронная функция
             return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🎬 Video / Clip", callback_data=f"get_clip:{video_id}")]])
     return None
 
@@ -74,7 +74,7 @@ async def send_action_loop(bot: Bot, chat_id: int, action: ChatAction, delay: in
             await asyncio.sleep(delay)
     except asyncio.CancelledError: pass
 
-# --- ПЛЕЙЛИСТЫ ---
+# --- ЛОГИКА ПЛЕЙЛИСТОВ ---
 def generate_playlist_keyboard(playlist_id, page=0):
     data = PLAYLIST_CACHE.get(playlist_id)
     if not data: return None
@@ -147,7 +147,6 @@ async def show_spotify_playlist_ui(message, url):
 @user_router.message(F.text.contains("http"))
 async def handle_link(message: types.Message):
     user = message.from_user
-    # Получаем язык
     can, _, _, lang = await check_access_and_update(user, message)
     if not can: return
     
@@ -166,6 +165,41 @@ async def handle_link(message: types.Message):
         await message.answer(await t(user.id, 'error_link'))
         return
 
+    # --- УМНАЯ ОТПРАВКА С ТЕГОМ ---
+    async def smart_send(send_method, caption_base, **kwargs):
+        """
+        Пытается ответить. Если не вышло - шлет в чат с тегом автора.
+        """
+        user_mention = f"<a href='tg://user?id={user.id}'>{html.escape(user.first_name)}</a>"
+        
+        try:
+            return await send_method(
+                chat_id=message.chat.id, 
+                reply_to_message_id=message.message_id, 
+                caption=caption_base,
+                **kwargs
+            )
+        except Exception as e:
+            err = str(e).lower()
+            if "not found" in err or "deleted" in err:
+                req_text = await t(user.id, 'req_by', user=user_mention)
+                # Добавляем в конец caption
+                new_caption = f"{caption_base}\n{req_text}"
+
+                if message.reply_to_message:
+                    try:
+                        return await send_method(
+                            chat_id=message.chat.id, 
+                            reply_to_message_id=message.reply_to_message.message_id, 
+                            caption=new_caption,
+                            **kwargs
+                        )
+                    except: pass
+                
+                return await send_method(chat_id=message.chat.id, caption=new_caption, **kwargs)
+            raise e
+    # ---------------------------------
+
     # ПЛЕЙЛИСТ SPOTIFY
     if "spotify" in url and ("/playlist/" in url or "/album/" in url):
         await show_spotify_playlist_ui(message, url)
@@ -181,11 +215,11 @@ async def handle_link(message: types.Message):
             if is_audio_cache: reply_markup = get_clip_keyboard(url, user.id)
 
             if db_cache['media_type'] == 'video': 
-                await message.answer_video(db_cache['file_id'], caption=caption, parse_mode="HTML")
+                await smart_send(message.bot.send_video, caption_base=caption, video=db_cache['file_id'], parse_mode="HTML")
             elif db_cache['media_type'] == 'audio': 
-                await message.answer_audio(db_cache['file_id'], caption=caption, parse_mode="HTML", reply_markup=reply_markup)
+                await smart_send(message.bot.send_audio, caption_base=caption, audio=db_cache['file_id'], parse_mode="HTML", reply_markup=reply_markup)
             elif db_cache['media_type'] == 'photo': 
-                await message.answer_photo(db_cache['file_id'], caption=caption, parse_mode="HTML")
+                await smart_send(message.bot.send_photo, caption_base=caption, photo=db_cache['file_id'], parse_mode="HTML")
             await send_log("SUCCESS", f"Cache Hit: {url}", user=user)
             return
         except: pass
@@ -199,7 +233,6 @@ async def handle_link(message: types.Message):
     await send_log("USER_REQ", f"URL: {url}", user=user)
     status_msg = await message.answer(await t(user.id, 'wait'))
 
-    # --- РАСПАКОВКА 4-Х ЗНАЧЕНИЙ ---
     files, folder_path, error, meta = await download_content(url)
 
     # ОБРАБОТКА ПЛЕЙЛИСТА
@@ -283,7 +316,6 @@ async def handle_link(message: types.Message):
         target = media_files[0]
         ext = os.path.splitext(target)[1].lower()
 
-        # Формируем имя
         if not meta_title:
              fname = os.path.basename(target)
              raw = os.path.splitext(fname)[0]
@@ -300,7 +332,6 @@ async def handle_link(message: types.Message):
         if meta_artist and meta_artist not in final_title:
             caption_header = f"{meta_artist} - {final_title}"
             
-        # Формируем подпись с Odesli
         is_audio_file = ext in audio_exts
         caption = make_caption(f"{caption_header}{resolution_text}", url, caption_override, is_audio=is_audio_file)
         
@@ -319,9 +350,8 @@ async def handle_link(message: types.Message):
                 media_group.append(InputMediaPhoto(media=FSInputFile(img), caption=cap, parse_mode="HTML"))
             await message.answer_media_group(media_group)
             audio_f = next((f for f in files if f.endswith(tuple(audio_exts))), None)
-            if audio_f: 
-                bot_name = settings.BOT_USERNAME or "ch4roff_bot"
-                await message.answer_audio(FSInputFile(audio_f), caption="🎵 Sound", performer=f"@{bot_name}")
+            bot_name = settings.BOT_USERNAME or "ch4roff_bot"
+            if audio_f: await message.answer_audio(FSInputFile(audio_f), caption="🎵 Sound", performer=f"@{bot_name}")
             await send_log("SUCCESS", f"TikTok Carousel: {url}", user=user)
             await status_msg.delete()
             return
@@ -330,8 +360,12 @@ async def handle_link(message: types.Message):
             await message.bot.send_chat_action(chat_id=message.chat.id, action=ChatAction.UPLOAD_VOICE)
             thumb = next((f for f in files if f.endswith(('.jpg', '.png'))), None)
             reply_markup = get_clip_keyboard(url, user.id)
-            sent_msg = await message.answer_audio(
-                FSInputFile(target), caption=caption, parse_mode="HTML",
+            
+            sent_msg = await smart_send(
+                message.bot.send_audio,
+                caption_base=caption,
+                audio=FSInputFile(target), 
+                parse_mode="HTML",
                 thumbnail=FSInputFile(thumb) if thumb else None,
                 performer=final_artist, title=final_title, reply_markup=reply_markup
             )
@@ -339,15 +373,22 @@ async def handle_link(message: types.Message):
 
         elif ext in video_exts:
             action_task = asyncio.create_task(send_action_loop(message.bot, message.chat.id, ChatAction.UPLOAD_VIDEO))
-            sent_msg = await message.answer_video(
-                FSInputFile(target), caption=caption, parse_mode="HTML",
+            sent_msg = await smart_send(
+                message.bot.send_video,
+                caption_base=caption,
+                video=FSInputFile(target), 
+                parse_mode="HTML",
                 thumbnail=None, supports_streaming=True,
                 width=vid_width, height=vid_height
             )
             m_type = "video"
         
         else:
-            sent_msg = await message.answer_photo(FSInputFile(target), caption=caption, parse_mode="HTML")
+            sent_msg = await smart_send(
+                message.bot.send_photo,
+                caption_base=caption,
+                photo=FSInputFile(target), parse_mode="HTML"
+            )
             m_type = "photo"
 
         await send_log("SUCCESS", f"Success: {url}", user=user)
@@ -378,7 +419,7 @@ async def handle_plain_text(message: types.Message):
     if not message.text: return
     txt = message.text.strip()
     if not txt or txt.startswith("/"): return
-    can, _ = await check_access_and_update(user, message)
+    can, _, _, lang = await check_access_and_update(user, message)
     if not can: return
     try: await log_other_message(txt, user=user)
     except: pass

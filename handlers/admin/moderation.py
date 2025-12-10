@@ -10,16 +10,31 @@ from logs.logger import send_log
 async def cmd_users(message: types.Message):
     if not is_admin(message.from_user.id): return
     users = await get_all_users()
-    txt = f"📋 <b>Users: {len(users)}</b>\n\n"
-    for i, u in enumerate(users):
-        if i >= 20: 
-            txt += "<i>...more...</i>"
+    txt = f"📋 <b>Database ({len(users)}):</b>\n\n"
+    
+    count = 0
+    for u in users:
+        if count >= 30: # Лимит вывода
+            txt += "<i>... и другие ...</i>"
             break
-        icon = "⛔" if u['is_banned'] else ("💀" if not u['is_active'] else "✅")
+            
+        uid = u['user_id']
         name = str(u['username']).replace("<", "&lt;") if u['username'] else "NoName"
-        line = f"{icon} <code>{u['user_id']}</code> | @{name}\n"
-        if u['is_banned'] or not u['is_active']: line = f"<s>{line}</s>"
+        
+        # Иконки
+        if uid < 0: # Группа
+            type_icon = "👥"
+        else: # Юзер
+            type_icon = "👤"
+            
+        status_icon = "⛔" if u['is_banned'] else "✅"
+        
+        line = f"{status_icon} {type_icon} <code>{uid}</code> | {name}\n"
+        if u['is_banned']: line = f"<s>{line}</s>"
+        
         txt += line
+        count += 1
+        
     await message.answer(txt, parse_mode="HTML")
 
 @admin_router.message(Command("ban"))

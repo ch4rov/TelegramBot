@@ -3,7 +3,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-BOT_VERSION = "2.5.5"
+BOT_VERSION = "2.5.6"
 
 # --- ТОКЕНЫ ---
 BOT_TOKEN = os.getenv("BOT_TOKEN")

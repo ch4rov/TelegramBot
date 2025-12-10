@@ -59,6 +59,10 @@ async def init_db():
         await db.commit()
 
 async def add_or_update_user(user_id, username):
+    """
+    Регистрирует пользователя ИЛИ группу.
+    Для групп user_id < 0, username = Название группы.
+    """
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     async with aiosqlite.connect(DB_NAME) as db:
         cursor = await db.execute("SELECT is_banned, ban_reason, language FROM users WHERE user_id = ?", (user_id,))
@@ -66,6 +70,7 @@ async def add_or_update_user(user_id, username):
         
         if data:
             is_banned, ban_reason, lang = data[0], data[1], data[2]
+            # Обновляем last_seen и имя (если сменилось)
             await db.execute("UPDATE users SET last_seen = ?, username = ?, is_active = 1 WHERE user_id = ?", (now, username, user_id))
             await db.commit()
             return False, bool(is_banned), ban_reason, lang or 'en'
@@ -75,7 +80,9 @@ async def add_or_update_user(user_id, username):
                 (user_id, username, now, now, False, None, 1, 'en')
             )
             await db.commit()
-            print(f"➕ [DB] Новый юзер: {user_id} ({username})")
+            
+            log_prefix = "👥 [DB] Новая группа" if user_id < 0 else "➕ [DB] Новый юзер"
+            print(f"{log_prefix}: {user_id} ({username})")
             return True, False, None, 'en'
 
 async def set_user_language(user_id, lang):

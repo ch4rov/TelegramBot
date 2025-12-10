@@ -14,6 +14,7 @@ from aiogram.dispatcher.middlewares.base import BaseMiddleware
 from aiogram.exceptions import TelegramNetworkError
 from languages import LANGUAGES
 import settings 
+from services.database_service import get_module_status
 
 from handlers import user, admin, inline_handler, search_handler
 from middlewares import AccessMiddleware
@@ -66,7 +67,12 @@ async def set_ui_commands(bot):
             admin_commands.append(command)
         elif cat.startswith("admin"):
             admin_commands.append(command)
-    
+    if await get_module_status("TelegramVideo"):
+        # Описание можно взять из languages, если сделать get_string, но пока хардкод или из settings
+        # Добавляем вручную
+        vn_cmd = BotCommand(command="videomessage", description="📹 Video Note")
+        user_commands.append(vn_cmd)
+        admin_commands.append(vn_cmd)
     await bot.set_my_commands(user_commands, scope=BotCommandScopeDefault())
     
     admin_id = os.getenv("ADMIN_ID")

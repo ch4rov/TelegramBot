@@ -12,6 +12,7 @@ STRINGS = {
     'cmd_login': "Connect Last.fm",
     'cmd_language': "Change Language",
     'cmd_videomessage': "Create Video Note",
+    'req_by': "• Запрошено {user}",
     
     # Admin Commands
     'cmd_users': "List users",
