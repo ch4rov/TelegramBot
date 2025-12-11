@@ -19,10 +19,19 @@ class ErrorCaptureLogger:
 
 def _clean_error_message(error_text: str) -> str:
     if not error_text: return "Unknown Error"
+
+    if "Instagram sent an empty media response" in str(error_text):
+        return "Instagram Post Unavailable. Possibly Private or Deleted."
+
     ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
     text = ansi_escape.sub('', str(error_text))
-    if "ERROR:" in text: text = text.split("ERROR:", 1)[1].strip()
+    
+    if "ERROR:" in text: 
+        parts = text.split("ERROR:", 1)
+        if len(parts) > 1: text = parts[1].strip()
+    
     lines = text.split('\n')
+    # Filter out traceback lines
     clean_lines = [line for line in lines if "Traceback" not in line and "File " not in line and line.strip()]
     return " ".join(clean_lines[:2])
 
@@ -41,18 +50,21 @@ class CommonDownloader(ABC):
         pass
 
     async def download(self):
-        # 1. Проверка FFmpeg
+        # 1. FFmpeg Check
         base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         local_ffmpeg = os.path.join(base_dir, "core", "installs", "ffmpeg.exe")
         
         ffmpeg_location = None
-        if os.path.exists(local_ffmpeg): ffmpeg_location = os.path.dirname(local_ffmpeg)
-        elif shutil.which("ffmpeg"): ffmpeg_location = None
+        if os.path.exists(local_ffmpeg): 
+            ffmpeg_location = os.path.dirname(local_ffmpeg)
+        elif shutil.which("ffmpeg"): 
+            ffmpeg_location = None
         else:
-            print(f"❌ [SYSTEM] FFmpeg не найден!")
+            print(f"❌ [SYSTEM] FFmpeg not found!")
             return None, None, "System Error: FFmpeg missing.", None
 
-        if not os.path.exists(self.download_path): os.makedirs(self.download_path)
+        if not os.path.exists(self.download_path): 
+            os.makedirs(self.download_path)
 
         skip_conversion = self.options.get('skip_conversion', False)
         user_cookie_content = self.options.get('user_cookie_content')
@@ -61,30 +73,33 @@ class CommonDownloader(ABC):
         ydl_opts = self.get_platform_settings()
         
         ydl_opts.update({
-            # БЕЗОПАСНОЕ ИМЯ ФАЙЛА (на диске)
-            # Мы не используем title здесь, чтобы избежать спецсимволов
+            # SAFE FILENAME: Use ID to avoid charset issues
             'outtmpl': f'{self.download_path}/%(id)s.%(ext)s',
             
             'max_filesize': settings.MAX_FILE_SIZE,
             'logger': capture_logger,
             'quiet': True,
             'writethumbnail': True,
-            'writeinfojson': True, # Обязательно для метаданных
+            'writeinfojson': True, # Required for metadata
             'overwrites': True,
+            'force_overwrites': True,
             'socket_timeout': 20,
             'trim_file_name': 200
         })
 
-        if 'postprocessors' not in ydl_opts: ydl_opts['postprocessors'] = []
+        if 'postprocessors' not in ydl_opts: 
+            ydl_opts['postprocessors'] = []
 
         if not skip_conversion:
              has_conv = any(p['key'] == 'FFmpegVideoConvertor' for p in ydl_opts['postprocessors'])
-             if not has_conv: ydl_opts['postprocessors'].insert(0, {'key': 'FFmpegVideoConvertor', 'preferedformat': 'mp4'})
+             if not has_conv: 
+                 ydl_opts['postprocessors'].insert(0, {'key': 'FFmpegVideoConvertor', 'preferedformat': 'mp4'})
 
         ydl_opts['postprocessors'].append({'key': 'FFmpegMetadata', 'add_metadata': True})
         ydl_opts['postprocessors'].append({'key': 'FFmpegThumbnailsConvertor', 'format': 'jpg'})
 
-        if ffmpeg_location: ydl_opts['ffmpeg_location'] = ffmpeg_location
+        if ffmpeg_location: 
+            ydl_opts['ffmpeg_location'] = ffmpeg_location
 
         if user_cookie_content:
             cpath = os.path.join(self.download_path, "user.txt")
@@ -93,20 +108,21 @@ class CommonDownloader(ABC):
         elif os.path.exists("cookies.txt"):
             ydl_opts['cookiefile'] = "cookies.txt"
 
-        # === ЗАПУСК ===
+        # === ATTEMPT 1 ===
         print(f"⬇️ [DOWNLOAD] Start: {self.url}")
         loop = asyncio.get_event_loop()
         await loop.run_in_executor(None, lambda: self._run_yt_dlp(ydl_opts))
         
         files = self._get_files()
         
-        # Ошибка размера
+        # Check size limit error
         if capture_logger.error_message and "too large" in str(capture_logger.error_message):
              self._safe_remove()
              return None, None, "File too large", None
 
-        # === SAFE MODE ===
+        # === ATTEMPT 2: SAFE MODE ===
         if not files or capture_logger.error_message:
+            print(f"⚠️ [DOWNLOAD] Retry Safe Mode...")
             self._clean_folder()
 
             capture_logger_2 = ErrorCaptureLogger()
@@ -115,12 +131,14 @@ class CommonDownloader(ABC):
             retry_opts['writethumbnail'] = False
             retry_opts['postprocessors'] = []
             
+            # Restore essential postprocessors
             if 'postprocessors' in self.options:
                 retry_opts['postprocessors'].extend(self.options['postprocessors'])
             elif not skip_conversion:
                 retry_opts['postprocessors'].append({'key': 'FFmpegVideoConvertor', 'preferedformat': 'mp4'})
             
-            if ffmpeg_location: retry_opts['ffmpeg_location'] = ffmpeg_location
+            if ffmpeg_location: 
+                retry_opts['ffmpeg_location'] = ffmpeg_location
 
             await loop.run_in_executor(None, lambda: self._run_yt_dlp(retry_opts))
             files = self._get_files()
@@ -131,7 +149,7 @@ class CommonDownloader(ABC):
                 self._safe_remove()
                 return None, None, _clean_error_message(err), None
 
-        # === ЧТЕНИЕ МЕТАДАННЫХ ===
+        # === READ METADATA ===
         metadata = {}
         info_json = next((f for f in files if f.endswith('.info.json')), None)
         if info_json:
@@ -140,11 +158,11 @@ class CommonDownloader(ABC):
                     metadata = json.load(f)
             except: pass
             
-        # Удаляем технические файлы из списка (оставляем только медиа)
+        # Clean list (remove json/tmp)
         clean_files = [f for f in files if not f.endswith('.info.json')]
 
         print(f"✅ [DOWNLOAD] Success. Files: {len(clean_files)}")
-        # ВОЗВРАЩАЕМ 4 ЗНАЧЕНИЯ
+        # RETURN 4 VALUES
         return clean_files, self.download_path, None, metadata
 
     def _run_yt_dlp(self, opts):

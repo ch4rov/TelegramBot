@@ -3,7 +3,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-BOT_VERSION = "2.5.6"
+BOT_VERSION = "2.5.7"
 
 # --- ТОКЕНЫ ---
 BOT_TOKEN = os.getenv("BOT_TOKEN")
@@ -25,6 +25,12 @@ else:
     USE_LOCAL_SERVER = os.getenv("USE_LOCAL_SERVER", "False").lower() == "true"
     LOCAL_SERVER_URL = os.getenv("LOCAL_SERVER_URL", "http://localhost:8081")
     STARTUP_ERROR_MESSAGE = None
+
+# --- ЛИМИТЫ (НОВОЕ) ---
+# Глобальный лимит (для режима /limit on)
+GLOBAL_MAX_CONCURRENT = 3
+# Лимит на одного пользователя (всегда активен)
+USER_MAX_CONCURRENT = 3
 # --- ЛИМИТЫ ---
 MAX_FILE_SIZE = 2000 * 1024 * 1024 if USE_LOCAL_SERVER else 50 * 1024 * 1024
 MAX_CONCURRENT_DOWNLOADS = 3
@@ -39,6 +45,11 @@ TECH_CHAT_ID = os.getenv("TECH_CHAT_ID")
 env_testers = os.getenv("TESTERS_IDS", "")
 TESTERS_LIST = set(int(x) for x in env_testers.split(",")) if env_testers else set()
 if os.getenv("ADMIN_ID"): TESTERS_LIST.add(int(os.getenv("ADMIN_ID")))
+
+# --- WEB DASHBOARD (НОВОЕ) ---
+ENABLE_WEB_DASHBOARD = os.getenv("ENABLE_WEB_DASHBOARD", "False").lower() == "true"
+WEB_SERVER_HOST = "0.0.0.0"
+WEB_SERVER_PORT = 8080
 
 SAFE_CHARS = r'[a-zA-Z0-9\-\_\.\/\?\=\&\%\+\~]+'
 

@@ -8,7 +8,7 @@ import html
 from aiogram import F, types, Bot
 from aiogram.types import FSInputFile, InputMediaPhoto, InputMediaVideo, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.enums import ChatAction
-from aiogram.exceptions import TelegramBadRequest
+from aiogram.exceptions import TelegramRetryAfter, TelegramBadRequest
 
 from .router import user_router, check_access_and_update, ACTIVE_DOWNLOADS
 from services.database_service import get_cached_file, save_cached_file, get_user_cookie, get_module_status
@@ -20,15 +20,36 @@ from services.search_service import search_youtube
 from languages import t
 import messages as msg 
 import settings
+from core.queue_manager import queue_manager
 
-# --- КЭШ ПЛЕЙЛИСТОВ ---
+# Кэш плейлистов
 from uuid import uuid4
 import math
 PLAYLIST_CACHE = {}
 
+# --- ANTI-FLOOD ДЛЯ СТАТУСОВ ---
+LAST_STATUS_TIME = {} 
+
+# --- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ---
+
+async def safe_api_call(func, *args, **kwargs):
+    """
+    Выполняет функцию (которая возвращает корутину) с обработкой FloodWait.
+    Принимает саму функцию (например message.answer), а не её результат.
+    """
+    try:
+        return await func(*args, **kwargs)
+    except TelegramRetryAfter as e:
+        print(f"⏳ FloodWait: sleep {e.retry_after}s")
+        await asyncio.sleep(e.retry_after)
+        # Рекурсивный вызов - создаст новую корутину
+        return await safe_api_call(func, *args, **kwargs)
+    except Exception as e:
+        raise e
+
 def make_caption(title_text, url, override=None, is_audio=False, request_by=None):
     """
-    Формирует подпись с поддержкой Odesli и тегом запросившего (если это репост/восстановление).
+    Формирует подпись с поддержкой Odesli и тегом запросившего.
     """
     bot_name = settings.BOT_USERNAME or "ch4roff_bot"
     bot_link = f"@{bot_name}"
@@ -70,7 +91,8 @@ def get_clip_keyboard(url: str, user_id: int):
 async def send_action_loop(bot: Bot, chat_id: int, action: ChatAction, delay: int = 5):
     try:
         while True:
-            await bot.send_chat_action(chat_id=chat_id, action=action)
+            try: await bot.send_chat_action(chat_id=chat_id, action=action)
+            except: pass
             await asyncio.sleep(delay)
     except asyncio.CancelledError: pass
 
@@ -122,26 +144,26 @@ async def handle_playlist_download(callback: types.CallbackQuery):
     new_callback.data = f"music:YT:{results[0]['id']}"
     await handle_music_selection(new_callback)
 
-async def show_spotify_playlist_ui(message, url):
+async def show_spotify_playlist_ui(message, url, reply_func):
     if not await get_module_status("Spotify"):
-         await message.answer(msg.MSG_DISABLE_MODULE)
+         await reply_func(msg.MSG_DISABLE_MODULE)
          return
-    status_msg = await message.answer("⏳ Scanning playlist...")
+    status_msg = await reply_func("⏳ Scanning playlist...")
     try:
         strategy = SpotifyStrategy(url)
         playlist_info = await strategy.get_playlist_tracks()
         if not playlist_info:
-            await status_msg.edit_text("❌ Failed to read playlist.")
+            await safe_api_call(status_msg.edit_text, "❌ Failed to read playlist (Private or Deleted).")
             return
         title, tracks = playlist_info
         if not tracks:
-            await status_msg.edit_text("📂 Playlist is empty.")
+            await safe_api_call(status_msg.edit_text, "📂 Playlist is empty.")
             return
         p_id = str(uuid4())
         PLAYLIST_CACHE[p_id] = {'title': title, 'tracks': tracks}
         keyboard = generate_playlist_keyboard(p_id, 0)
-        await status_msg.edit_text(f"📂 <b>Spotify Playlist</b>\n🎶 <b>{title}</b>\n🔢 Tracks: {len(tracks)}\n", reply_markup=keyboard, parse_mode="HTML")
-    except Exception as e: await status_msg.edit_text(f"❌ Error: {e}")
+        await safe_api_call(status_msg.edit_text, f"📂 <b>Spotify Playlist</b>\n🎶 <b>{title}</b>\n🔢 Tracks: {len(tracks)}\n", reply_markup=keyboard, parse_mode="HTML")
+    except Exception as e: await safe_api_call(status_msg.edit_text, f"❌ Error: {e}")
 
 # --- ОБРАБОТКА ССЫЛОК ---
 @user_router.message(F.text.contains("http"))
@@ -154,55 +176,58 @@ async def handle_link(message: types.Message):
     caption_override = None
     if "|" in url_raw:
         parts = url_raw.split("|", 1)
-        url_raw, caption_override = parts[0].strip(), parts[1].strip()
+        url_raw = parts[0].strip()
+        caption_override = parts[1].strip()
     
     for c in [';', '\n', ' ', '$', '`', '|']: 
         if c in url_raw: url_raw = url_raw.split(c)[0]
     url = clean_url(url_raw)
 
-    if not is_valid_url(url):
-        if message.chat.type != "private": return
-        await message.answer(await t(user.id, 'error_link'))
-        return
-
-    # --- УМНАЯ ОТПРАВКА С ТЕГОМ ---
-    async def smart_send(send_method, caption_base, **kwargs):
-        """
-        Пытается ответить. Если не вышло - шлет в чат с тегом автора.
-        """
+    # --- УМНАЯ ОТПРАВКА (REPLY) ---
+    async def smart_reply(text=None, **kwargs):
+        """Отвечает на сообщение или ветку"""
         user_mention = f"<a href='tg://user?id={user.id}'>{html.escape(user.first_name)}</a>"
+        method = message.bot.send_message
         
+        async def try_send_impl(chat_id, reply_to, **k):
+            if text:
+                return await safe_api_call(message.bot.send_message, chat_id=chat_id, reply_to_message_id=reply_to, text=text, **k)
+            return reply_to
+
         try:
-            return await send_method(
-                chat_id=message.chat.id, 
-                reply_to_message_id=message.message_id, 
-                caption=caption_base,
-                **kwargs
-            )
+            return await try_send_impl(message.chat.id, message.message_id, **kwargs)
+        except Exception as e:
+            err = str(e).lower()
+            if "not found" in err or "deleted" in err:
+                if text:
+                    new_text = f"{text}\n• {await t(user.id, 'req_by', user=user_mention)}"
+                    return await safe_api_call(message.bot.send_message, chat_id=message.chat.id, text=new_text, **kwargs)
+            raise e
+            
+    async def smart_media_send(send_method, caption_base, **kwargs):
+        user_mention = f"<a href='tg://user?id={user.id}'>{html.escape(user.first_name)}</a>"
+        try:
+            return await safe_api_call(send_method, chat_id=message.chat.id, reply_to_message_id=message.message_id, caption=caption_base, **kwargs)
         except Exception as e:
             err = str(e).lower()
             if "not found" in err or "deleted" in err:
                 req_text = await t(user.id, 'req_by', user=user_mention)
-                # Добавляем в конец caption
                 new_caption = f"{caption_base}\n{req_text}"
-
                 if message.reply_to_message:
                     try:
-                        return await send_method(
-                            chat_id=message.chat.id, 
-                            reply_to_message_id=message.reply_to_message.message_id, 
-                            caption=new_caption,
-                            **kwargs
-                        )
+                        return await safe_api_call(send_method, chat_id=message.chat.id, reply_to_message_id=message.reply_to_message.message_id, caption=new_caption, **kwargs)
                     except: pass
-                
-                return await send_method(chat_id=message.chat.id, caption=new_caption, **kwargs)
+                return await safe_api_call(send_method, chat_id=message.chat.id, caption=new_caption, **kwargs)
             raise e
     # ---------------------------------
 
-    # ПЛЕЙЛИСТ SPOTIFY
+    if not is_valid_url(url):
+        if message.chat.type != "private": return
+        await smart_reply(await t(user.id, 'error_link'))
+        return
+
     if "spotify" in url and ("/playlist/" in url or "/album/" in url):
-        await show_spotify_playlist_ui(message, url)
+        await show_spotify_playlist_ui(message, url, smart_reply)
         return
 
     # 1. SMART CACHE
@@ -215,32 +240,41 @@ async def handle_link(message: types.Message):
             if is_audio_cache: reply_markup = get_clip_keyboard(url, user.id)
 
             if db_cache['media_type'] == 'video': 
-                await smart_send(message.bot.send_video, caption_base=caption, video=db_cache['file_id'], parse_mode="HTML")
+                await smart_media_send(message.bot.send_video, caption_base=caption, video=db_cache['file_id'], parse_mode="HTML")
             elif db_cache['media_type'] == 'audio': 
-                await smart_send(message.bot.send_audio, caption_base=caption, audio=db_cache['file_id'], parse_mode="HTML", reply_markup=reply_markup)
+                await smart_media_send(message.bot.send_audio, caption_base=caption, audio=db_cache['file_id'], parse_mode="HTML", reply_markup=reply_markup)
             elif db_cache['media_type'] == 'photo': 
-                await smart_send(message.bot.send_photo, caption_base=caption, photo=db_cache['file_id'], parse_mode="HTML")
+                await smart_media_send(message.bot.send_photo, caption_base=caption, photo=db_cache['file_id'], parse_mode="HTML")
             await send_log("SUCCESS", f"Cache Hit: {url}", user=user)
             return
         except: pass
 
-    # 2. ЗАГРУЗКА
-    if ACTIVE_DOWNLOADS.get(user.id, 0) >= settings.MAX_CONCURRENT_DOWNLOADS:
-        await message.answer("⚠️ Queue full.")
-        return
-    ACTIVE_DOWNLOADS[user.id] = ACTIVE_DOWNLOADS.get(user.id, 0) + 1
+    # 2. ЗАГРУЗКА (ОЧЕРЕДЬ)
+    status_msg = None
+    now = time.time()
+    last_status = LAST_STATUS_TIME.get(user.id, 0)
     
-    await send_log("USER_REQ", f"URL: {url}", user=user)
-    status_msg = await message.answer(await t(user.id, 'wait'))
+    if (now - last_status) > 2.0:
+        try:
+            status_msg = await smart_reply(await t(user.id, 'wait'))
+            LAST_STATUS_TIME[user.id] = now
+        except: pass
 
-    files, folder_path, error, meta = await download_content(url)
+    async def download_task():
+        await send_log("USER_REQ", f"URL: {url}", user=user)
+        return await download_content(url)
 
-    # ОБРАБОТКА ПЛЕЙЛИСТА
+    try:
+        files, folder_path, error, meta = await queue_manager.process_task(user.id, download_task)
+    except Exception as e:
+        if status_msg: await safe_api_call(status_msg.edit_text, "⚠️ Queue full.")
+        return
+
+    # Обработка плейлиста
     if error and "IS_SPOTIFY_PLAYLIST" in str(error):
-        await status_msg.delete()
-        if user.id in ACTIVE_DOWNLOADS: del ACTIVE_DOWNLOADS[user.id]
+        if status_msg: await safe_api_call(status_msg.delete)
         if folder_path: shutil.rmtree(folder_path, ignore_errors=True)
-        await show_spotify_playlist_ui(message, url)
+        await show_spotify_playlist_ui(message, url, smart_reply)
         return
 
     # ОШИБКИ
@@ -249,30 +283,28 @@ async def handle_link(message: types.Message):
         if any(m in err_str for m in ["sign in", "login", "private", "access", "blocked", "followers", "confirm", "captcha", "unsupported url"]):
             user_cookies = await get_user_cookie(user.id)
             if user_cookies:
-                await status_msg.edit_text("🔐 Using cookies...")
+                if status_msg: await safe_api_call(status_msg.edit_text, "🔐 Using cookies...")
                 files, folder_path, error, meta = await download_content(url, {'user_cookie_content': user_cookies})
             else:
                 txt = await t(user.id, 'auth_required')
-                await message.answer(txt, parse_mode="HTML")
-                await status_msg.delete()
-                if user.id in ACTIVE_DOWNLOADS: del ACTIVE_DOWNLOADS[user.id]
+                if status_msg: await safe_api_call(status_msg.delete)
+                await smart_reply(txt, parse_mode="HTML")
                 return
 
         if error and ("too large" in err_str or "larger than" in err_str) and not settings.USE_LOCAL_SERVER:
-            await status_msg.edit_text("⚠️ >50 MB. Compressing...")
+            if status_msg: await safe_api_call(status_msg.edit_text, "⚠️ >50 MB. Compressing...")
             low_opts = {'format': 'worst[ext=mp4]+bestaudio[ext=m4a]/worst[ext=mp4]/worst', 'user_cookie_content': await get_user_cookie(user.id)}
             files, folder_path, error, meta = await download_content(url, low_opts)
     
     if error:
         txt = await t(user.id, 'error', error=error)
-        await status_msg.edit_text(txt)
+        if status_msg: await safe_api_call(status_msg.edit_text, txt)
+        else: await smart_reply(txt)
         await send_log("FAIL", f"Fail: {error}", user=user)
-        if user.id in ACTIVE_DOWNLOADS: del ACTIVE_DOWNLOADS[user.id]
         return
         
     # МЕТАДАННЫЕ
     resolution_text = ""
-    name_no_ext = ""
     vid_width, vid_height = None, None
     meta_artist, meta_title = None, None
 
@@ -339,29 +371,36 @@ async def handle_link(message: types.Message):
 
         if is_tiktok_photo and len([f for f in media_files if f.endswith(tuple(image_exts))]) > 1:
             if not await get_module_status("TikTokPhotos"):
-                 await message.answer(await t(user.id, 'module_disabled'))
-                 await status_msg.delete()
+                 await smart_reply(await t(user.id, 'module_disabled'))
+                 if status_msg: await safe_api_call(status_msg.delete)
                  return
-            await message.bot.send_chat_action(chat_id=message.chat.id, action=ChatAction.UPLOAD_PHOTO)
+            try: await safe_api_call(message.bot.send_chat_action, chat_id=message.chat.id, action=ChatAction.UPLOAD_PHOTO)
+            except: pass
+            
             media_group = []
             images = [f for f in media_files if f.endswith(tuple(image_exts))]
             for i, img in enumerate(images[:10]):
                 cap = caption if i == 0 else None
                 media_group.append(InputMediaPhoto(media=FSInputFile(img), caption=cap, parse_mode="HTML"))
-            await message.answer_media_group(media_group)
+            
+            try: await safe_api_call(message.reply_media_group, media=media_group)
+            except: await safe_api_call(message.answer_media_group, media=media_group)
+
             audio_f = next((f for f in files if f.endswith(tuple(audio_exts))), None)
             bot_name = settings.BOT_USERNAME or "ch4roff_bot"
-            if audio_f: await message.answer_audio(FSInputFile(audio_f), caption="🎵 Sound", performer=f"@{bot_name}")
+            if audio_f: await smart_media_send(message.bot.send_audio, caption="🎵 Sound", audio=FSInputFile(audio_f), performer=f"@{bot_name}")
+            
             await send_log("SUCCESS", f"TikTok Carousel: {url}", user=user)
-            await status_msg.delete()
+            if status_msg: await safe_api_call(status_msg.delete)
             return
 
         if ext in audio_exts:
-            await message.bot.send_chat_action(chat_id=message.chat.id, action=ChatAction.UPLOAD_VOICE)
+            try: await safe_api_call(message.bot.send_chat_action, chat_id=message.chat.id, action=ChatAction.UPLOAD_VOICE)
+            except: pass
             thumb = next((f for f in files if f.endswith(('.jpg', '.png'))), None)
             reply_markup = get_clip_keyboard(url, user.id)
             
-            sent_msg = await smart_send(
+            sent_msg = await smart_media_send(
                 message.bot.send_audio,
                 caption_base=caption,
                 audio=FSInputFile(target), 
@@ -373,7 +412,7 @@ async def handle_link(message: types.Message):
 
         elif ext in video_exts:
             action_task = asyncio.create_task(send_action_loop(message.bot, message.chat.id, ChatAction.UPLOAD_VIDEO))
-            sent_msg = await smart_send(
+            sent_msg = await smart_media_send(
                 message.bot.send_video,
                 caption_base=caption,
                 video=FSInputFile(target), 
@@ -384,7 +423,7 @@ async def handle_link(message: types.Message):
             m_type = "video"
         
         else:
-            sent_msg = await smart_send(
+            sent_msg = await smart_media_send(
                 message.bot.send_photo,
                 caption_base=caption,
                 photo=FSInputFile(target), parse_mode="HTML"
@@ -400,16 +439,16 @@ async def handle_link(message: types.Message):
             elif m_type == "photo": fid = sent_msg.photo[-1].file_id
             if fid: await save_cached_file(url, fid, m_type, title=caption_header) 
 
-        await status_msg.delete() 
+        if status_msg: await safe_api_call(status_msg.delete)
 
     except Exception as e:
         if "Request timeout error" in str(e): await send_log("WARN", f"Timeout: {e}", user=user)
         else:
-            await message.answer(f"⚠️ Error: {e}")
+            try: await safe_api_call(message.answer, f"⚠️ Error: {e}")
+            except: pass
             await send_log("FAIL", f"Send Error: {e}", user=user)
     finally:
         if action_task: action_task.cancel()
-        if ACTIVE_DOWNLOADS.get(user.id) > 0: ACTIVE_DOWNLOADS[user.id] -= 1
         if folder_path and os.path.exists(folder_path): shutil.rmtree(folder_path, ignore_errors=True)
 
 @user_router.message(F.text & ~F.text.contains("http"))
@@ -418,21 +457,25 @@ async def handle_plain_text(message: types.Message):
     user = message.from_user
     if not message.text: return
     txt = message.text.strip()
-    if not txt or txt.startswith("/"): return
+    
+    # 1. Анти-Спам (Длина)
+    if len(txt) > 150 or txt.count('\n') > 5:
+        return 
+
     can, _, _, lang = await check_access_and_update(user, message)
     if not can: return
     try: await log_other_message(txt, user=user)
     except: pass
 
     if not await get_module_status("TextFind"):
-        await message.answer(await t(user.id, 'module_disabled'))
+        await safe_api_call(message.answer, await t(user.id, 'module_disabled'))
         return
 
-    await message.bot.send_chat_action(chat_id=message.chat.id, action=ChatAction.TYPING)
+    await safe_api_call(message.bot.send_chat_action, chat_id=message.chat.id, action=ChatAction.TYPING)
     results = await search_youtube(txt, limit=5)
     
     if not results:
-        await message.answer(await t(user.id, 'nothing_found'))
+        await safe_api_call(message.answer, await t(user.id, 'nothing_found'))
         return
 
     buttons = []
@@ -448,4 +491,4 @@ async def handle_plain_text(message: types.Message):
     buttons.append([InlineKeyboardButton(text=close_txt, callback_data="delete_msg")])
     
     search_txt = await t(user.id, 'search_title', query=txt)
-    await message.answer(search_txt, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons), parse_mode="HTML")
+    await safe_api_call(message.answer, search_txt, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons), parse_mode="HTML")

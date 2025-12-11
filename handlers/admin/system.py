@@ -9,9 +9,10 @@ from aiogram.filters import Command
 from aiogram.enums import ChatAction
 
 from .router import admin_router, is_admin
-from services.database_service import get_all_users, clear_file_cache, get_module_status, set_module_status
+from services.database_service import get_all_users, clear_file_cache, get_module_status, set_module_status, set_system_value, get_system_value
 from logs.logger import send_log
 from core.installs.ffmpeg_installer import check_and_install_ffmpeg
+from core.queue_manager import queue_manager  # <--- Added import
 import settings
 
 # --- STATUS ---
@@ -67,7 +68,6 @@ async def cmd_status(message: types.Message):
 
     # Info
     sys_info = f"Python {sys.version.split()[0]} / {platform.system()}"
-    # --- БЕРЕМ ВЕРСИЮ ИЗ SETTINGS ---
     report.append(f"📦 <b>Bot Ver:</b> <code>{settings.BOT_VERSION}</code> | {sys_info}")
 
     total_time = time.perf_counter() - start_time_total
@@ -153,3 +153,37 @@ async def cmd_restart(message: types.Message):
     await message.answer("♻️ Перезагрузка...")
     await send_log("ADMIN", "Restart", admin=message.from_user)
     sys.exit(65)
+
+# --- LIMIT ---
+@admin_router.message(Command("limit"))
+async def cmd_limit(message: types.Message):
+    if not is_admin(message.from_user.id): return
+    
+    args = message.text.split()
+    
+    # Status output
+    if len(args) == 1:
+        mode = queue_manager.limit_mode
+        active = sum(queue_manager.active_tasks.values())
+        await message.answer(
+            f"🚦 <b>Limit Status:</b>\n"
+            f"Mode: <b>{mode.upper()}</b>\n"
+            f"Active tasks: {active}\n\n"
+            f"<code>/limit on</code> - Global limit (3)\n"
+            f"<code>/limit user</code> - Admin unlimited, others 3\n"
+            f"<code>/limit off</code> - No global limit (User &lt;= 3)", # <--- FIXED HERE
+            parse_mode="HTML"
+        )
+        return
+
+    new_mode = args[1].lower()
+    if new_mode not in ['on', 'off', 'user']:
+        await message.answer("❌ Invalid mode. Use: on / off / user")
+        return
+
+    # Apply and save
+    queue_manager.set_mode(new_mode)
+    await set_system_value("limit_mode", new_mode)
+    
+    await message.answer(f"✅ Limit mode set to: <b>{new_mode.upper()}</b>", parse_mode="HTML")
+    await send_log("ADMIN", f"Limit mode changed -> {new_mode}", admin=message.from_user)

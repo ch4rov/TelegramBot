@@ -9,32 +9,54 @@ from logs.logger import send_log
 @admin_router.message(Command("users"))
 async def cmd_users(message: types.Message):
     if not is_admin(message.from_user.id): return
-    users = await get_all_users()
-    txt = f"📋 <b>Database ({len(users)}):</b>\n\n"
+    all_entities = await get_all_users()
     
-    count = 0
-    for u in users:
-        if count >= 30: # Лимит вывода
-            txt += "<i>... и другие ...</i>"
-            break
+    # Разделяем на группы и людей
+    groups = []
+    users = []
+    
+    for u in all_entities:
+        if u['user_id'] < 0: groups.append(u)
+        else: users.append(u)
+    
+    txt = f"📊 <b>Database Report:</b>\n"
+    txt += f"Всего: {len(all_entities)} (👥 {len(groups)} | 👤 {len(users)})\n\n"
+
+    # 1. Группы
+    if groups:
+        txt += "<b>👥 Группы:</b>\n"
+        for g in groups[:20]: # Лимит вывода 20
+            icon = "✅"
+            if g['is_banned']: icon = "⛔" # Забанена админом
+            elif not g['is_active']: icon = "🚫" # Бот кикнут
             
-        uid = u['user_id']
-        name = str(u['username']).replace("<", "&lt;") if u['username'] else "NoName"
-        
-        # Иконки
-        if uid < 0: # Группа
-            type_icon = "👥"
-        else: # Юзер
-            type_icon = "👤"
+            name = str(g['username']).replace("<", "&lt;")
+            reason = f" | Причина: {g['ban_reason']}" if g['is_banned'] and g['ban_reason'] else ""
             
-        status_icon = "⛔" if u['is_banned'] else "✅"
-        
-        line = f"{status_icon} {type_icon} <code>{uid}</code> | {name}\n"
-        if u['is_banned']: line = f"<s>{line}</s>"
-        
-        txt += line
-        count += 1
-        
+            line = f"{icon} {name} | <code>{g['user_id']}</code>{reason}\n"
+            if g['is_banned']: line = f"<s>{line}</s>"
+            txt += line
+        txt += "\n"
+
+    # 2. Пользователи
+    if users:
+        txt += "<b>👤 Пользователи:</b>\n"
+        for u in users[:40]: # Лимит 40
+            icon = "✅"
+            if u['is_banned']: icon = "❌" # Забанен
+            elif not u['is_active']: icon = "⛔" # Заблокировал бота
+            
+            name = str(u['username']).replace("<", "&lt;") if u['username'] else ""
+            tag = f" | @{name}" if name else ""
+            reason = f" | Причина: {u['ban_reason']}" if u['is_banned'] and u['ban_reason'] else ""
+            
+            line = f"{icon} {u['user_id']}{tag}{reason}\n"
+            if u['is_banned']: line = f"<s>{line}</s>"
+            txt += line
+
+    if len(all_entities) > 60:
+        txt += "\n<i>...список обрезан...</i>"
+
     await message.answer(txt, parse_mode="HTML")
 
 @admin_router.message(Command("ban"))

@@ -15,7 +15,9 @@ from aiogram.exceptions import TelegramNetworkError
 from languages import LANGUAGES
 import settings 
 from services.database_service import get_module_status
-
+from services.web_dashboard import run_web_server
+from services.database_service import get_system_value
+from core.queue_manager import queue_manager
 from handlers import user, admin, inline_handler, search_handler
 from middlewares import AccessMiddleware
 from core.installs.ffmpeg_installer import check_and_install_ffmpeg 
@@ -152,7 +154,9 @@ async def main():
     check_and_install_ffmpeg()
     clean_downloads_on_startup()
     await init_db()
-    
+    saved_mode = await get_system_value("limit_mode")
+    if saved_mode: queue_manager.set_mode(saved_mode)
+    await run_web_server()
     if settings.IS_TEST_ENV: print("🛑 ВНИМАНИЕ: ВКЛЮЧЕН ТЕСТОВЫЙ РЕЖИМ")
     else: print("✅ ВКЛЮЧЕН STABLE РЕЖИМ")
 
