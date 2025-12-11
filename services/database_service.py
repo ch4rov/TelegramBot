@@ -226,9 +226,7 @@ async def set_user_language(u, l):
     async with aiosqlite.connect(DB_NAME) as db: await db.execute("UPDATE users SET language=? WHERE user_id=?", (l, u)); await db.commit()
 
 async def init_logs_table():
-    """Полная миграция: создает таблицу и добавляет ВСЕ недостающие колонки"""
     async with aiosqlite.connect('users.db') as db:
-        # 1. Создаем таблицу для новых установок
         await db.execute("""
             CREATE TABLE IF NOT EXISTS message_logs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -236,14 +234,16 @@ async def init_logs_table():
                 chat_id INTEGER,
                 username TEXT,
                 message_text TEXT,
-                msg_type TEXT,
+                event_type TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        
+        # Миграция: Добавляем все возможные недостающие колонки
         columns_to_check = [
             ("chat_id", "INTEGER"),
             ("message_text", "TEXT"),
-            ("msg_type", "TEXT"),
+            ("event_type", "TEXT"),
             ("username", "TEXT")
         ]
 
@@ -256,13 +256,12 @@ async def init_logs_table():
         await db.commit()
 
 async def log_message_to_db(user_id, chat_id, username, text, msg_type="TEXT"):
-    """Записывает сообщение в базу"""
     try:
         async with aiosqlite.connect('users.db') as db:
             await db.execute("""
-                INSERT INTO message_logs (user_id, chat_id, username, message_text, msg_type)
+                INSERT INTO message_logs (user_id, chat_id, username, message_text, event_type)
                 VALUES (?, ?, ?, ?, ?)
             """, (user_id, chat_id, username, text, msg_type))
             await db.commit()
     except Exception as e:
-        print(f"❌ Ошибка записи в БД: {e}")
+        print(f"DB Log Error: {e}")
