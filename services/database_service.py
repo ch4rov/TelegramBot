@@ -233,18 +233,19 @@ async def init_logs_table():
                 user_id INTEGER,
                 chat_id INTEGER,
                 username TEXT,
-                message_text TEXT,
+                content TEXT,
                 event_type TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
         
-        # Миграция: Добавляем все возможные недостающие колонки
+        # Миграция: Добавляем content и event_type
         columns_to_check = [
             ("chat_id", "INTEGER"),
-            ("message_text", "TEXT"),
+            ("content", "TEXT"),       # <--- Исправлено
             ("event_type", "TEXT"),
-            ("username", "TEXT")
+            ("username", "TEXT"),
+            ("message_text", "TEXT")   # Оставляем для совместимости со старыми записями
         ]
 
         for col_name, col_type in columns_to_check:
@@ -258,8 +259,9 @@ async def init_logs_table():
 async def log_message_to_db(user_id, chat_id, username, text, msg_type="TEXT"):
     try:
         async with aiosqlite.connect('users.db') as db:
+            # Пишем и в content (новое), и в message_text (старое, на всякий случай), или просто используем content
             await db.execute("""
-                INSERT INTO message_logs (user_id, chat_id, username, message_text, event_type)
+                INSERT INTO message_logs (user_id, chat_id, username, content, event_type)
                 VALUES (?, ?, ?, ?, ?)
             """, (user_id, chat_id, username, text, msg_type))
             await db.commit()
