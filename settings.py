@@ -1,9 +1,10 @@
 import os
+import time
 from dotenv import load_dotenv
 
 load_dotenv()
-
-BOT_VERSION = "2.5.7"
+START_TIME = time.time()
+BOT_VERSION = "2.5.8"
 
 # --- ТОКЕНЫ ---
 BOT_TOKEN = os.getenv("BOT_TOKEN")
@@ -49,7 +50,10 @@ if os.getenv("ADMIN_ID"): TESTERS_LIST.add(int(os.getenv("ADMIN_ID")))
 # --- WEB DASHBOARD (НОВОЕ) ---
 ENABLE_WEB_DASHBOARD = os.getenv("ENABLE_WEB_DASHBOARD", "False").lower() == "true"
 WEB_SERVER_HOST = "0.0.0.0"
-WEB_SERVER_PORT = 8080
+WEB_SERVER_PORT = 8082
+WEB_ADMIN_USER = os.getenv("WEB_ADMIN_USER", "admin")
+WEB_ADMIN_PASS = os.getenv("WEB_ADMIN_PASS", "admin")
+WEB_SECRET_KEY = os.getenv("WEB_SECRET_KEY", "super_secret_cookie_key_123")
 
 SAFE_CHARS = r'[a-zA-Z0-9\-\_\.\/\?\=\&\%\+\~]+'
 
@@ -82,18 +86,9 @@ BOT_COMMANDS_LIST = [
     ("ban", "cmd_ban", "admin_mod", True),
     ("unban", "cmd_unban", "admin_mod", True),
     ("answer", "cmd_answer", "admin_mod", True),
-    
-    # Админ - Техническое
-    ("status", "cmd_status", "admin_tech", False),
     ("check", "cmd_check", "admin_tech", False),
     ("update", "cmd_update", "admin_tech", False),
     ("clearcache", "cmd_clearcache", "admin_tech", False),
-    ("fix_ffmpeg", "cmd_fix_ffmpeg", "admin_tech", False),
-    ("get_placeholder", "cmd_get_placeholder", "admin_tech", False),
-    ("get_audio_placeholder", "cmd_get_audio_placeholder", "admin_tech", False),
-    ("modules", "cmd_modules", "admin_tech", False),
-    ("return_local", "cmd_return_local", "admin_tech", False),
-    ("exec", "cmd_exec", "admin_tech", True),
 ]
 
 # --- МОДУЛИ (Вкл/Выкл) ---

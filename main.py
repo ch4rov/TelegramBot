@@ -19,7 +19,7 @@ from services.web_dashboard import run_web_server
 from services.database_service import get_system_value
 from core.queue_manager import queue_manager
 from handlers import user, admin, inline_handler, search_handler
-from middlewares import AccessMiddleware
+from middlewares import AccessMiddleware, DBLoggingMiddleware
 from core.installs.ffmpeg_installer import check_and_install_ffmpeg 
 from services.placeholder_service import ensure_placeholders
 
@@ -159,7 +159,11 @@ async def main():
     await run_web_server()
     if settings.IS_TEST_ENV: print("🛑 ВНИМАНИЕ: ВКЛЮЧЕН ТЕСТОВЫЙ РЕЖИМ")
     else: print("✅ ВКЛЮЧЕН STABLE РЕЖИМ")
+    if settings.ENABLE_WEB_DASHBOARD: 
+        await run_web_server()
+        print("🌐 ВКЛЮЧЕН WEB DASHBOARD")
 
+    dp.update.outer_middleware(DBLoggingMiddleware())
     dp.update.outer_middleware(AccessMiddleware()) 
     dp.update.outer_middleware(ConsoleLoggerMiddleware())
     
@@ -185,7 +189,7 @@ async def main():
         try: await bot.send_message(settings.ADMIN_ID, settings.STARTUP_ERROR_MESSAGE, parse_mode="HTML")
         except: pass
         settings.STARTUP_ERROR_MESSAGE = None
-
+    settings.START_TIME = time.time()
     print("🚀 Бот запущен!")
     await send_log("SYSTEM", f"Запуск ({'LOCAL' if settings.USE_LOCAL_SERVER else 'CLOUD'}).")
     

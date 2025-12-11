@@ -1,48 +1,30 @@
-import subprocess
+import os
 import sys
 import time
-import os
+import subprocess
 
-# Устанавливаем UTF-8 кодировку для вывода
-os.environ['PYTHONIOENCODING'] = 'utf-8'
-
-# Имя файла твоего бота
-BOT_SCRIPT = "main.py"
-# Код выхода для специальной перезагрузки
-RESTART_EXIT_CODE = 65
-
-def start_bot():
-    interpreter = sys.executable  # Используем тот же Python (из venv)
-    print("🔋 [RUNNER] Запуск планировщика...")
-
+def main():
     while True:
+        print("\n🔋 [RUNNER] Запуск main.py...")
+        process = subprocess.Popen([sys.executable, "main.py"])
+        
         try:
-            print(f"\n🚀 [RUNNER] Запуск {BOT_SCRIPT}...")
-            # Запускаем бота с UTF-8 кодировкой
-            env = os.environ.copy()
-            env['PYTHONIOENCODING'] = 'utf-8'
-            process = subprocess.Popen([interpreter, BOT_SCRIPT], env=env)
-            process.wait()  # Ждем завершения
-
-            # Проверяем, как завершился бот
-            if process.returncode == RESTART_EXIT_CODE:
-                print("♻️ [RUNNER] Команда перезагрузки. Рестарт через 1 сек...")
-                time.sleep(1)
-            elif process.returncode == 0:
-                print("🛑 [RUNNER] Бот остановлен вручную (код 0). Выход.")
-                break
-            else:
-                print(f"⚠️ [RUNNER] Бот упал (код {process.returncode}). Перезапуск через 5 сек...")
-                time.sleep(5)
-
+            process.wait()
         except KeyboardInterrupt:
-            print("\n🛑 [RUNNER] Остановка по Ctrl+C")
-            if 'process' in locals():
-                process.terminate()
+            print("\n🛑 Останавливаю бота...")
+            process.terminate()
+            
+            # --- ЧИСТКА ПРОЦЕССОВ ПРИ ВЫХОДЕ ---
+            try:
+                # На Windows убиваем дерево процессов принудительно
+                subprocess.run(f"taskkill /F /T /PID {process.pid}", shell=True, stderr=subprocess.DEVNULL)
+            except: pass
+            
             break
-        except Exception as e:
-            print(f"❌ [RUNNER] Критическая ошибка: {e}")
-            break
+
+        exit_code = process.returncode
+        print(f"⚠️ [RUNNER] Бот упал (код {exit_code}). Перезапуск через 5 сек...")
+        time.sleep(5)
 
 if __name__ == "__main__":
-    start_bot()
+    main()

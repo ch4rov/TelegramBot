@@ -5,6 +5,7 @@ import asyncio
 import re
 from datetime import datetime
 import settings
+from services.database_service import log_activity
 
 # Локальные файлы логов
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -131,6 +132,11 @@ async def _add_to_buffer(content: str):
 async def send_log(style_key: str, message: str, user=None, admin=None):
     """Добавляет лог в буфер для отправки."""
     await log_local(style_key, message, user=user, admin=admin)
+    if user:
+        u_id = user.id
+        u_name = user.username or "NoName"
+        clean_msg = message.replace("URL: ", "")
+        await log_activity(u_id, u_name, style_key, clean_msg)
 
     ts = int(time.time())
     time_tag = f"<t:{ts}:T>"

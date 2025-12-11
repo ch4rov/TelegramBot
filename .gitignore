@@ -203,7 +203,9 @@ cython_debug/
 # Marimo
 logs/files/
 users.db
-
+*.pyc
+*.log
+*.txt
 core/installs/ffmpeg.exe
 core/installs/ffprobe.exe
 /downloads
