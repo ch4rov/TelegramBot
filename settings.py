@@ -4,7 +4,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 START_TIME = time.time()
-BOT_VERSION = "2.5.8"
+BOT_VERSION = "2.6"
 
 # --- ТОКЕНЫ ---
 BOT_TOKEN = os.getenv("BOT_TOKEN")

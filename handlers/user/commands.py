@@ -8,7 +8,7 @@ from aiogram.filters import CommandStart, Command
 
 from .router import user_router, check_access_and_update
 from services.database_service import set_lastfm_username, save_user_cookie, get_module_status, set_user_language
-from logs.logger import send_log
+from core.logger_system import send_log
 from languages import t
 import settings
 

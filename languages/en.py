@@ -40,4 +40,5 @@ STRINGS = {
     'nothing_found': "🔍 Nothing found.",
     'search_title': "🔎 <b>Search Results:</b>\n<code>{query}</code>",
     'btn_close': "❌ Close",
+    'vn_start': "🎬 <b>Video Note Creation</b>\n\nPlease send me a video (MP4 format, max 50MB) to convert it into a video note (circular video).",
 }

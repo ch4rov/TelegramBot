@@ -1,4 +1,7 @@
 import aiosqlite
+import os
+import re
+import json
 from datetime import datetime
 import settings
 
@@ -6,335 +9,260 @@ DB_NAME = "users.db"
 
 async def init_db():
     async with aiosqlite.connect(DB_NAME) as db:
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS users (
-                user_id INTEGER PRIMARY KEY,
-                username TEXT,
-                full_name TEXT, -- <--- НОВАЯ КОЛОНКА
-                first_seen TEXT,
-                last_seen TEXT,
-                is_banned BOOLEAN DEFAULT 0,
-                ban_reason TEXT DEFAULT NULL,
-                is_active BOOLEAN DEFAULT 1,
-                lastfm_username TEXT DEFAULT NULL,
-                language TEXT DEFAULT 'en'
-            )
-        """)
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS file_cache (
-                url TEXT PRIMARY KEY,
-                file_id TEXT,
-                media_type TEXT,
-                created_at TEXT,
-                title TEXT
-            )
-        """)
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS user_cookies (
-                user_id INTEGER PRIMARY KEY,
-                cookie_data TEXT,
-                updated_at TEXT
-            )
-        """)
+        await init_logs_table()
+        # Таблица пользователей
+        await db.execute("""CREATE TABLE IF NOT EXISTS users (
+            user_id INTEGER PRIMARY KEY, username TEXT, full_name TEXT,
+            first_seen TEXT, last_seen TEXT, is_banned BOOLEAN DEFAULT 0,
+            ban_reason TEXT DEFAULT NULL, is_active BOOLEAN DEFAULT 1,
+            lastfm_username TEXT DEFAULT NULL, language TEXT DEFAULT 'en'
+        )""")
+        
+        # Таблица полных логов сообщений
+        await db.execute("""CREATE TABLE IF NOT EXISTS message_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, username TEXT,
+            event_type TEXT, content TEXT, message_id INTEGER, raw_data TEXT,
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+        )""")
+        
+        # Старая таблица логов (для совместимости, если нужна)
+        await db.execute("""CREATE TABLE IF NOT EXISTS activity_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, username TEXT,
+            action TEXT, details TEXT, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+        )""")
+
+        await db.execute("""CREATE TABLE IF NOT EXISTS file_cache (
+            url TEXT PRIMARY KEY, file_id TEXT, media_type TEXT, created_at TEXT, title TEXT
+        )""")
+        
+        # Таблица куки с поддержкой сервисов
+        await db.execute("""CREATE TABLE IF NOT EXISTS user_cookies (
+            user_id INTEGER, service_name TEXT, cookie_data TEXT, updated_at TEXT,
+            PRIMARY KEY (user_id, service_name)
+        )""")
+        
         await db.execute("CREATE TABLE IF NOT EXISTS system_config (key TEXT PRIMARY KEY, value TEXT)")
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS modules_config (
-                module_name TEXT PRIMARY KEY,
-                is_enabled BOOLEAN DEFAULT 1
-            )
-        """)
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS activity_logs (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER,
-                username TEXT,
-                action TEXT, -- USER_REQ, SUCCESS, FAIL
-                details TEXT,
-                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
+        await db.execute("CREATE TABLE IF NOT EXISTS modules_config (module_name TEXT PRIMARY KEY, is_enabled BOOLEAN DEFAULT 1)")
         
         # Миграции
         try: await db.execute("ALTER TABLE users ADD COLUMN full_name TEXT DEFAULT NULL")
         except: pass
-        try: await db.execute("ALTER TABLE users ADD COLUMN ban_reason TEXT DEFAULT NULL")
-        except: pass
-        try: await db.execute("ALTER TABLE users ADD COLUMN is_active BOOLEAN DEFAULT 1")
-        except: pass
-        try: await db.execute("ALTER TABLE users ADD COLUMN lastfm_username TEXT DEFAULT NULL")
-        except: pass
-        try: await db.execute("ALTER TABLE file_cache ADD COLUMN title TEXT DEFAULT NULL")
-        except: pass
         try: await db.execute("ALTER TABLE users ADD COLUMN language TEXT DEFAULT 'en'")
         except: pass
+        try: await db.execute("ALTER TABLE user_cookies ADD COLUMN service_name TEXT DEFAULT 'default'")
+        except: pass
         
         await db.commit()
+
+# --- ЛОГИРОВАНИЕ (ИСПРАВЛЕНО ИМЯ) ---
+
+async def add_message_log(user_id, username, event_type, content, message_id=None, raw_data=None):
+    """Основная функция записи лога (вызывается из logger_system)"""
+    try:
+        raw_str = json.dumps(raw_data, default=str) if raw_data else "{}"
+        async with aiosqlite.connect(DB_NAME) as db:
+            # Пишем в основную таблицу
+            await db.execute(
+                "INSERT INTO message_logs (user_id, username, event_type, content, message_id, raw_data) VALUES (?, ?, ?, ?, ?, ?)", 
+                (user_id, username, event_type, content, message_id, raw_str)
+            )
+            # Дублируем в activity_logs для старой статистики (пока веб-панель её использует)
+            await db.execute(
+                "INSERT INTO activity_logs (user_id, username, action, details) VALUES (?, ?, ?, ?)", 
+                (user_id, username, event_type, content)
+            )
+            await db.commit()
+    except Exception as e: print(f"DB Log Error: {e}")
+
 async def log_activity(user_id, username, action, details):
-    async with aiosqlite.connect(DB_NAME) as db:
-        await db.execute(
-            "INSERT INTO activity_logs (user_id, username, action, details) VALUES (?, ?, ?, ?)",
-            (user_id, username, action, details)
-        )
-        await db.commit()
+    """Алиас для старых вызовов (например, из веб-панели)"""
+    await add_message_log(user_id, username, action, details, None, None)
 
-async def get_stats_period(period_sql):
-    """
-    period_sql: '-1 hour', '-1 day', '-7 days', '-1 month'
-    """
-    async with aiosqlite.connect(DB_NAME) as db:
-        cursor = await db.execute(f"""
-            SELECT 
-                COUNT(*) as total,
-                SUM(CASE WHEN action = 'SUCCESS' THEN 1 ELSE 0 END) as success
-            FROM activity_logs 
-            WHERE timestamp >= datetime('now', '{period_sql}')
-        """)
-        row = await cursor.fetchone()
-        total = row[0] or 0
-        success = row[1] or 0
-        return total, success
+# --- USERS ---
 
-async def get_user_logs(user_id, limit=None):
-    """
-    Возвращает логи. 
-    Берет из БД последние N записей (DESC), но возвращает их 
-    в хронологическом порядке (ASC) для правильного отображения в чате.
-    """
-    async with aiosqlite.connect(DB_NAME) as db:
-        db.row_factory = aiosqlite.Row
-        
-        query = "SELECT * FROM activity_logs WHERE user_id = ? ORDER BY id DESC"
-        params = (user_id,)
-        
-        if limit:
-            query += " LIMIT ?"
-            params = (user_id, limit)
-            
-        cursor = await db.execute(query, params)
-        rows = await cursor.fetchall()
-        
-        # Разворачиваем список, чтобы старые были сверху, новые снизу
-        return list(reversed(rows))
-
-async def clear_cache_older_than(minutes):
-    async with aiosqlite.connect(DB_NAME) as db:
-        # SQLite modifier: '-X minutes'
-        await db.execute(f"DELETE FROM file_cache WHERE created_at < datetime('now', '-{minutes} minutes')")
-        await db.commit()
-
-async def add_or_update_user(user_id, username, full_name=None): # <--- full_name
+async def add_or_update_user(user_id, username, full_name=None):
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     async with aiosqlite.connect(DB_NAME) as db:
         cursor = await db.execute("SELECT is_banned, ban_reason, language FROM users WHERE user_id = ?", (user_id,))
         data = await cursor.fetchone()
-        
         if data:
-            is_banned, ban_reason, lang = data[0], data[1], data[2]
-            # Обновляем имя и полное имя
             await db.execute("UPDATE users SET last_seen = ?, username = ?, full_name = ?, is_active = 1 WHERE user_id = ?", (now, username, full_name, user_id))
             await db.commit()
-            return False, bool(is_banned), ban_reason, lang or 'en'
+            return False, bool(data[0]), data[1], data[2] or 'en'
         else:
-            await db.execute(
-                "INSERT INTO users (user_id, username, full_name, first_seen, last_seen, is_banned, ban_reason, is_active, language) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (user_id, username, full_name, now, now, False, None, 1, 'en')
-            )
+            await db.execute("INSERT INTO users (user_id, username, full_name, first_seen, last_seen, is_banned, language) VALUES (?, ?, ?, ?, ?, 0, 'en')", (user_id, username, full_name, now, now))
             await db.commit()
-            log_prefix = "👥 [DB] Новая группа" if user_id < 0 else "➕ [DB] Новый юзер"
-            print(f"{log_prefix}: {user_id} ({username})")
             return True, False, None, 'en'
 
-async def set_user_language(user_id, lang):
+async def get_user(uid):
     async with aiosqlite.connect(DB_NAME) as db:
-        await db.execute("UPDATE users SET language = ? WHERE user_id = ?", (lang, user_id))
-        await db.commit()
-
-async def get_user_language(user_id):
-    async with aiosqlite.connect(DB_NAME) as db:
-        cursor = await db.execute("SELECT language FROM users WHERE user_id = ?", (user_id,))
-        row = await cursor.fetchone()
-        return row[0] if row else 'en'
-
-# ... (Остальные функции set_lastfm, get_user, set_ban и т.д. остаются без изменений) ...
-# Вставьте сюда остальные функции из вашего файла, я их не трогал
-async def set_lastfm_username(user_id, lfm_user):
-    async with aiosqlite.connect(DB_NAME) as db:
-        await db.execute("UPDATE users SET lastfm_username = ? WHERE user_id = ?", (lfm_user, int(user_id)))
-        await db.commit()
-
-async def get_user(user_id):
-    async with aiosqlite.connect(DB_NAME) as db:
-        db.row_factory = aiosqlite.Row; cursor = await db.execute("SELECT * FROM users WHERE user_id = ?", (int(user_id),)); row = await cursor.fetchone()
-        return dict(row) if row else None
+        db.row_factory = aiosqlite.Row
+        r = await (await db.execute("SELECT * FROM users WHERE user_id = ?", (uid,))).fetchone()
+        return dict(r) if r else None
 
 async def get_all_users():
     async with aiosqlite.connect(DB_NAME) as db:
-        db.row_factory = aiosqlite.Row; cursor = await db.execute("SELECT * FROM users ORDER BY first_seen DESC"); return await cursor.fetchall()
+        db.row_factory = aiosqlite.Row
+        return [dict(r) for r in await (await db.execute("SELECT * FROM users ORDER BY first_seen DESC")).fetchall()]
 
-async def set_ban_status(user_id, is_banned: bool, reason: str = None):
+async def get_users_filtered(query=None):
     async with aiosqlite.connect(DB_NAME) as db:
-        if is_banned: await db.execute("UPDATE users SET is_banned = ?, ban_reason = ? WHERE user_id = ?", (1, reason, user_id))
-        else: await db.execute("UPDATE users SET is_banned = ?, ban_reason = NULL WHERE user_id = ?", (0, user_id))
+        db.row_factory = aiosqlite.Row
+        sql = "SELECT u.*, (SELECT COUNT(*) FROM message_logs l WHERE l.user_id = u.user_id) as req_count FROM users u"
+        args = []
+        if query:
+            sql += " WHERE u.username LIKE ? OR u.full_name LIKE ? OR u.user_id LIKE ?"
+            q = f"%{query}%"
+            args = [q, q, q]
+        cursor = await db.execute(sql, args)
+        return [dict(u) for u in await cursor.fetchall()]
+
+async def get_users_with_stats(sort_by='last_seen'):
+    async with aiosqlite.connect(DB_NAME) as db:
+        db.row_factory = aiosqlite.Row
+        # Считаем по message_logs
+        query = "SELECT u.*, (SELECT COUNT(*) FROM message_logs l WHERE l.user_id = u.user_id) as req_count FROM users u"
+        rows = await (await db.execute(query)).fetchall()
+        users = [dict(u) for u in rows]
+        reverse = True
+        key = lambda x: x['last_seen'] or ""
+        if sort_by == 'first_seen': key = lambda x: x['first_seen'] or ""
+        elif sort_by == 'requests': key = lambda x: x['req_count']
+        return sorted(users, key=key, reverse=reverse)
+
+# --- GET LOGS (Используем message_logs для админки) ---
+
+async def get_user_logs(user_id, limit=None, search=None, action_filter=None):
+    async with aiosqlite.connect(DB_NAME) as db:
+        db.row_factory = aiosqlite.Row
+        # Мапим новые поля (event_type -> action, content -> details) для совместимости с шаблоном
+        sql = "SELECT id, user_id, username, event_type as action, content as details, timestamp FROM message_logs WHERE user_id = ?"
+        args = [user_id]
+        if search:
+            sql += " AND content LIKE ?"
+            args.append(f"%{search}%")
+        if action_filter and action_filter != 'ALL':
+            sql += " AND event_type = ?"
+            args.append(action_filter)
+        sql += " ORDER BY id DESC"
+        if limit:
+            sql += " LIMIT ?"
+            args.append(limit)
+        cursor = await db.execute(sql, tuple(args))
+        rows = await cursor.fetchall()
+        return list(reversed(rows))
+
+async def delete_user_logs(user_id):
+    async with aiosqlite.connect(DB_NAME) as db:
+        await db.execute("DELETE FROM message_logs WHERE user_id = ?", (user_id,))
+        await db.execute("DELETE FROM activity_logs WHERE user_id = ?", (user_id,))
         await db.commit()
 
-async def set_user_active(user_id: int, is_active: bool):
+async def get_global_stats():
     async with aiosqlite.connect(DB_NAME) as db:
-        await db.execute("UPDATE users SET is_active = ? WHERE user_id = ?", (1 if is_active else 0, user_id))
-        await db.commit()
+        try:
+            r1 = await db.execute("SELECT COUNT(*) FROM message_logs")
+            t = (await r1.fetchone())[0] or 0
+            r2 = await db.execute("SELECT COUNT(*) FROM message_logs WHERE event_type = 'MSG_SENT'")
+            s = (await r2.fetchone())[0] or 0
+            return t, s
+        except: return 0, 0
+
+async def get_stats_period(period_sql): return 0,0
+async def import_legacy_logs(): return 0
+
+# --- OTHER ---
+
+async def set_ban_status(user_id, is_banned, reason=None):
+    async with aiosqlite.connect(DB_NAME) as db:
+        await db.execute("UPDATE users SET is_banned = ?, ban_reason = ? WHERE user_id = ?", (1 if is_banned else 0, reason, user_id)); await db.commit()
+async def web_ban_user(u, r): await set_ban_status(u, True, r)
+async def web_unban_user(u): await set_ban_status(u, False)
+
+async def get_module_status(m):
+    async with aiosqlite.connect(DB_NAME) as db:
+        r = await (await db.execute("SELECT is_enabled FROM modules_config WHERE module_name=?", (m,))).fetchone(); return bool(r[0]) if r else True
+async def set_module_status(m, s):
+    async with aiosqlite.connect(DB_NAME) as db: await db.execute("INSERT OR REPLACE INTO modules_config (module_name, is_enabled) VALUES (?, ?)", (m, 1 if s else 0)); await db.commit()
+
+async def get_system_value(k):
+    async with aiosqlite.connect(DB_NAME) as db: r = await (await db.execute("SELECT value FROM system_config WHERE key=?", (k,))).fetchone(); return r[0] if r else None
+async def set_system_value(k, v):
+    async with aiosqlite.connect(DB_NAME) as db: await db.execute("INSERT OR REPLACE INTO system_config (key, value) VALUES (?, ?)", (k, v)); await db.commit()
+        
+async def clear_file_cache():
+    async with aiosqlite.connect(DB_NAME) as db: await db.execute("DELETE FROM file_cache"); await db.commit()
+async def clear_cache_older_than(minutes):
+    async with aiosqlite.connect(DB_NAME) as db: await db.execute(f"DELETE FROM file_cache WHERE created_at < datetime('now', '-{minutes} minutes')"); await db.commit()
 
 async def get_cached_file(url):
     async with aiosqlite.connect(DB_NAME) as db:
-        db.row_factory = aiosqlite.Row; cursor = await db.execute("SELECT file_id, media_type, title FROM file_cache WHERE url = ?", (url,)); row = await cursor.fetchone()
-        return dict(row) if row else None
-
+        db.row_factory = aiosqlite.Row; r = await (await db.execute("SELECT * FROM file_cache WHERE url=?", (url,))).fetchone(); return dict(r) if r else None
 async def save_cached_file(url, file_id, media_type, title=None):
+    async with aiosqlite.connect(DB_NAME) as db: await db.execute("INSERT OR REPLACE INTO file_cache (url, file_id, media_type, created_at, title) VALUES (?, ?, ?, datetime('now'), ?)", (url, file_id, media_type, title)); await db.commit()
+
+# --- COOKIES (С SERVICE_NAME) ---
+
+async def save_user_cookie(user_id, cookie_content, service_name='default'):
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     async with aiosqlite.connect(DB_NAME) as db:
-        await db.execute("INSERT OR REPLACE INTO file_cache (url, file_id, media_type, created_at, title) VALUES (?, ?, ?, ?, ?)", (url, file_id, media_type, now, title)); await db.commit()
+        await db.execute("INSERT OR REPLACE INTO user_cookies (user_id, service_name, cookie_data, updated_at) VALUES (?, ?, ?, ?)", (user_id, service_name, cookie_content, now)); await db.commit()
 
-async def save_user_cookie(user_id, cookie_content):
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+async def get_user_cookie(user_id, service_name='default'):
     async with aiosqlite.connect(DB_NAME) as db:
-        await db.execute("INSERT OR REPLACE INTO user_cookies (user_id, cookie_data, updated_at) VALUES (?, ?, ?)", (user_id, cookie_content, now)); await db.commit()
+        # Пробуем найти конкретный сервис, если нет - дефолт
+        r = await (await db.execute("SELECT cookie_data FROM user_cookies WHERE user_id=? AND service_name=?", (user_id, service_name))).fetchone()
+        if r: return r[0]
+        # Fallback
+        r = await (await db.execute("SELECT cookie_data FROM user_cookies WHERE user_id=? AND service_name='default'", (user_id,))).fetchone()
+        return r[0] if r else None
 
-async def get_user_cookie(user_id):
+async def set_lastfm_username(u, n):
+    async with aiosqlite.connect(DB_NAME) as db: await db.execute("UPDATE users SET lastfm_username=? WHERE user_id=?", (n, u)); await db.commit()
+async def get_user_language(u):
     async with aiosqlite.connect(DB_NAME) as db:
-        cursor = await db.execute("SELECT cookie_data FROM user_cookies WHERE user_id = ?", (user_id,)); row = await cursor.fetchone(); return row[0] if row else None
+        r = await (await db.execute("SELECT language FROM users WHERE user_id=?", (u,))).fetchone(); return r[0] if r else 'en'
+async def set_user_language(u, l):
+    async with aiosqlite.connect(DB_NAME) as db: await db.execute("UPDATE users SET language=? WHERE user_id=?", (l, u)); await db.commit()
 
-async def get_system_value(key):
-    async with aiosqlite.connect(DB_NAME) as db:
-        cursor = await db.execute("SELECT value FROM system_config WHERE key = ?", (key,)); row = await cursor.fetchone(); return row[0] if row else None
+async def init_logs_table():
+    """Полная миграция: создает таблицу и добавляет ВСЕ недостающие колонки"""
+    async with aiosqlite.connect('users.db') as db:
+        # 1. Создаем таблицу для новых установок
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS message_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER,
+                chat_id INTEGER,
+                username TEXT,
+                message_text TEXT,
+                msg_type TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        columns_to_check = [
+            ("chat_id", "INTEGER"),
+            ("message_text", "TEXT"),
+            ("msg_type", "TEXT"),
+            ("username", "TEXT")
+        ]
 
-async def set_system_value(key, value):
-    async with aiosqlite.connect(DB_NAME) as db:
-        await db.execute("INSERT OR REPLACE INTO system_config (key, value) VALUES (?, ?)", (key, value)); await db.commit()
-        
-async def clear_file_cache():
-    async with aiosqlite.connect(DB_NAME) as db:
-        await db.execute("DELETE FROM file_cache"); await db.commit()
+        for col_name, col_type in columns_to_check:
+            try:
+                await db.execute(f"ALTER TABLE message_logs ADD COLUMN {col_name} {col_type}")
+            except Exception:
+                pass 
 
-async def set_module_status(module_name: str, is_enabled: bool):
-    async with aiosqlite.connect(DB_NAME) as db:
-        await db.execute("INSERT OR REPLACE INTO modules_config (module_name, is_enabled) VALUES (?, ?)", (module_name, 1 if is_enabled else 0)); await db.commit()
-
-async def get_module_status(module_name: str) -> bool:
-    async with aiosqlite.connect(DB_NAME) as db:
-        cursor = await db.execute("SELECT is_enabled FROM modules_config WHERE module_name = ?", (module_name,)); row = await cursor.fetchone()
-        if row is None: return True
-        return bool(row[0])
-    
-async def get_global_stats():
-    """Возвращает общую статистику по логам"""
-    async with aiosqlite.connect(DB_NAME) as db:
-        # Всего запросов
-        c1 = await db.execute("SELECT COUNT(*) FROM activity_logs WHERE action IN ('USER_REQ', 'SUCCESS')")
-        total_reqs = (await c1.fetchone())[0]
-        
-        # Успешных
-        c2 = await db.execute("SELECT COUNT(*) FROM activity_logs WHERE action = 'SUCCESS'")
-        success_reqs = (await c2.fetchone())[0]
-        
-        return total_reqs, success_reqs
-
-async def get_users_with_stats(sort_by='last_seen'):
-    """
-    Возвращает список пользователей + количество их запросов.
-    sort_by: 'first_seen', 'last_seen', 'requests'
-    """
-    async with aiosqlite.connect(DB_NAME) as db:
-        db.row_factory = aiosqlite.Row
-        
-        # Сложный запрос: соединяем юзеров и подсчет их логов
-        # user_id < 0 = Группы, user_id > 0 = Люди
-        query = """
-            SELECT u.*, 
-            (SELECT COUNT(*) FROM activity_logs l WHERE l.user_id = u.user_id) as req_count 
-            FROM users u
-        """
-        
-        rows = await db.execute(query)
-        users = await rows.fetchall()
-        
-        # Превращаем в список словарей для сортировки в Python (проще и надежнее для SQLite)
-        result = [dict(u) for u in users]
-        
-        # Сортировка
-        reverse = True # По убыванию (сначала новые/активные)
-        
-        if sort_by == 'first_seen':
-            key = lambda x: x['first_seen'] or ""
-        elif sort_by == 'requests':
-            key = lambda x: x['req_count']
-        else: # last_seen
-            key = lambda x: x['last_seen'] or ""
-            
-        return sorted(result, key=key, reverse=reverse)
-    
-async def web_ban_user(user_id, reason):
-    async with aiosqlite.connect(DB_NAME) as db:
-        await db.execute("UPDATE users SET is_banned = 1, ban_reason = ? WHERE user_id = ?", (reason, user_id))
         await db.commit()
 
-async def web_unban_user(user_id):
-    async with aiosqlite.connect(DB_NAME) as db:
-        await db.execute("UPDATE users SET is_banned = 0, ban_reason = NULL WHERE user_id = ?", (user_id,))
-        await db.commit()
-
-# --- ЛОГИРОВАНИЕ ---
-async def log_activity(user_id, username, action, details):
-    async with aiosqlite.connect(DB_NAME) as db:
-        await db.execute(
-            "INSERT INTO activity_logs (user_id, username, action, details) VALUES (?, ?, ?, ?)",
-            (user_id, username, action, str(details))
-        )
-        await db.commit()
-
-async def get_user_logs(user_id, limit=None):
-    async with aiosqlite.connect(DB_NAME) as db:
-        db.row_factory = aiosqlite.Row
-        query = "SELECT * FROM activity_logs WHERE user_id = ? ORDER BY id DESC"
-        params = (user_id,)
-        if limit:
-            query += " LIMIT ?"
-            params = (user_id, limit)
-        cursor = await db.execute(query, params)
-        rows = await cursor.fetchall()
-        return list(reversed(rows)) # Для чата (старые сверху)
-
-# --- СТАТИСТИКА (ФИКС) ---
-async def get_global_stats():
-    """Возвращает (Всего, Успешно)"""
-    async with aiosqlite.connect(DB_NAME) as db:
-        try:
-            # Считаем общее количество любых действий
-            c1 = await db.execute("SELECT COUNT(*) FROM activity_logs")
-            row1 = await c1.fetchone()
-            total = row1[0] if row1 else 0
-            
-            # Считаем успешные загрузки
-            c2 = await db.execute("SELECT COUNT(*) FROM activity_logs WHERE action = 'SUCCESS'")
-            row2 = await c2.fetchone()
-            success = row2[0] if row2 else 0
-            
-            return total, success
-        except:
-            return 0, 0
-
-async def get_stats_period(period_sql):
-    """period_sql: '-1 day', '-1 hour'"""
-    async with aiosqlite.connect(DB_NAME) as db:
-        try:
-            cursor = await db.execute(f"""
-                SELECT COUNT(*) FROM activity_logs 
-                WHERE timestamp >= datetime('now', '{period_sql}')
-            """)
-            row = await cursor.fetchone()
-            return row[0] if row else 0, 0 # Возвращаем tuple
-        except:
-            return 0, 0
-    async with aiosqlite.connect(DB_NAME) as db:
-        await db.execute(
-            "INSERT INTO activity_logs (user_id, username, action, details) VALUES (?, ?, ?, ?)",
-            (user_id, username, action, details)
-        )
-        await db.commit()
+async def log_message_to_db(user_id, chat_id, username, text, msg_type="TEXT"):
+    """Записывает сообщение в базу"""
+    try:
+        async with aiosqlite.connect('users.db') as db:
+            await db.execute("""
+                INSERT INTO message_logs (user_id, chat_id, username, message_text, msg_type)
+                VALUES (?, ?, ?, ?, ?)
+            """, (user_id, chat_id, username, text, msg_type))
+            await db.commit()
+    except Exception as e:
+        print(f"❌ Ошибка записи в БД: {e}")

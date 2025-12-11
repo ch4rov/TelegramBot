@@ -6,13 +6,9 @@ class QueueManager:
     def __init__(self):
         # {user_id: Semaphore}
         self.user_locks = {}
-        # {user_id: int} - счетчик активных задач
+        # {user_id: int}
         self.active_tasks = {}
-        
-        # Глобальный лимит (если включен)
         self.global_sem = asyncio.Semaphore(settings.GLOBAL_MAX_CONCURRENT)
-        
-        # Режим лимитов: 'on', 'user', 'off'
         self.limit_mode = 'on' 
 
     def set_mode(self, mode: str):
@@ -20,46 +16,40 @@ class QueueManager:
 
     async def process_task(self, user_id: int, coroutine_func, *args, **kwargs):
         """
-        Добавляет задачу в очередь пользователя.
-        Выполняет её, когда освободится слот (макс 3).
+        Выполняет задачу с учетом лимитов.
+        Гарантирует освобождение слота при ошибках.
         """
-        # 1. Инициализация семафора юзера (Лимит 3)
         if user_id not in self.user_locks:
             self.user_locks[user_id] = asyncio.Semaphore(settings.USER_MAX_CONCURRENT)
             self.active_tasks[user_id] = 0
 
-        # Увеличиваем счетчик активных (для статистики)
+        # Увеличиваем счетчик ПЕРЕД ожиданием
         self.active_tasks[user_id] += 1
         
-        # 2. Ждем слот пользователя
-        async with self.user_locks[user_id]:
-            try:
-                # 3. Проверка глобальных лимитов
+        try:
+            # 1. Личный лимит (ждем слот)
+            async with self.user_locks[user_id]:
+                # 2. Глобальный лимит
                 is_admin = str(user_id) == str(settings.ADMIN_ID)
                 
-                # 'on' - лимит для всех
                 if self.limit_mode == 'on':
                     async with self.global_sem:
                         return await coroutine_func(*args, **kwargs)
                 
-                # 'user' - лимит для всех, кроме админа
-                elif self.limit_mode == 'user':
-                    if is_admin:
+                elif self.limit_mode == 'user' and not is_admin:
+                    async with self.global_sem:
                         return await coroutine_func(*args, **kwargs)
-                    else:
-                        async with self.global_sem:
-                            return await coroutine_func(*args, **kwargs)
                 
-                # 'off' - глобального лимита нет (только лимит на юзера)
                 else:
                     return await coroutine_func(*args, **kwargs)
                     
-            finally:
+        finally:
+            # Всегда уменьшаем счетчик, что бы ни случилось
+            if user_id in self.active_tasks:
                 self.active_tasks[user_id] -= 1
                 if self.active_tasks[user_id] <= 0:
-                    del self.active_tasks[user_id]
-                    # Не удаляем семафор сразу, чтобы избежать гонки, 
-                    # но можно чистить user_locks периодически
+                    # Чистим мусор, если задач нет
+                    self.active_tasks.pop(user_id, None)
+                    # Семафор не удаляем, чтобы не сломать ожидающие задачи
 
-# Глобальный инстанс
 queue_manager = QueueManager()

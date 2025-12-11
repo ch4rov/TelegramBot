@@ -1,7 +1,7 @@
 import re
 import settings
 from services.database_service import get_module_status
-import messages as msg
+from core.logger_system import send_log
 
 # Импорты стратегий
 from .VKDownloader.vk_strategy import VKStrategy

@@ -72,35 +72,27 @@ class CommonDownloader(ABC):
         capture_logger = ErrorCaptureLogger()
         ydl_opts = self.get_platform_settings()
         
+        # --- НАСТРОЙКА (СРАЗУ SAFE MODE) ---
         ydl_opts.update({
-            # SAFE FILENAME: Use ID to avoid charset issues
             'outtmpl': f'{self.download_path}/%(id)s.%(ext)s',
-            
             'max_filesize': settings.MAX_FILE_SIZE,
             'logger': capture_logger,
             'quiet': True,
-            'writethumbnail': True,
-            'writeinfojson': True, # Required for metadata
+            # Оставляем True для получения обложки, но не конвертируем её жестко
+            'writethumbnail': True, 
+            'writeinfojson': True, 
             'overwrites': True,
             'force_overwrites': True,
             'socket_timeout': 20,
-            'trim_file_name': 200
+            'trim_file_name': 200,
+            # Инициализируем пустой список постпроцессоров, чтобы добавить только нужное
+            'postprocessors': []
         })
-
-        if 'postprocessors' not in ydl_opts: 
-            ydl_opts['postprocessors'] = []
-
-        if not skip_conversion:
-             has_conv = any(p['key'] == 'FFmpegVideoConvertor' for p in ydl_opts['postprocessors'])
-             if not has_conv: 
-                 ydl_opts['postprocessors'].insert(0, {'key': 'FFmpegVideoConvertor', 'preferedformat': 'mp4'})
-
-        ydl_opts['postprocessors'].append({'key': 'FFmpegMetadata', 'add_metadata': True})
-        ydl_opts['postprocessors'].append({'key': 'FFmpegThumbnailsConvertor', 'format': 'jpg'})
 
         if ffmpeg_location: 
             ydl_opts['ffmpeg_location'] = ffmpeg_location
 
+        # Добавляем куки
         if user_cookie_content:
             cpath = os.path.join(self.download_path, "user.txt")
             with open(cpath, "w", encoding="utf-8") as f: f.write(user_cookie_content)
@@ -108,48 +100,39 @@ class CommonDownloader(ABC):
         elif os.path.exists("cookies.txt"):
             ydl_opts['cookiefile'] = "cookies.txt"
 
-        # === ATTEMPT 1 ===
+        # --- ЛОГИКА ПОСТПРОЦЕССИНГА ---
+        # Добавляем конвертацию видео в MP4 (если не отключено)
+        # Это то, что было в "Safe Mode"
+        if not skip_conversion:
+             ydl_opts['postprocessors'].append({
+                 'key': 'FFmpegVideoConvertor', 
+                 'preferedformat': 'mp4'
+             })
+        
+        # Мы убрали 'FFmpegMetadata' и 'FFmpegThumbnailsConvertor', которые были в 1-м способе,
+        # так как они часто вызывают ошибки на специфических видео.
+
+        # === ЗАПУСК СКАЧИВАНИЯ ===
         print(f"⬇️ [DOWNLOAD] Start: {self.url}")
         loop = asyncio.get_event_loop()
         await loop.run_in_executor(None, lambda: self._run_yt_dlp(ydl_opts))
         
         files = self._get_files()
         
-        # Check size limit error
-        if capture_logger.error_message and "too large" in str(capture_logger.error_message):
-             self._safe_remove()
-             return None, None, "File too large", None
-
-        # === ATTEMPT 2: SAFE MODE ===
-        if not files or capture_logger.error_message:
-            print(f"⚠️ [DOWNLOAD] Retry Safe Mode...")
-            self._clean_folder()
-
-            capture_logger_2 = ErrorCaptureLogger()
-            retry_opts = ydl_opts.copy()
-            retry_opts['logger'] = capture_logger_2
-            retry_opts['writethumbnail'] = False
-            retry_opts['postprocessors'] = []
+        # Проверка ошибок
+        if not files:
+            # Если файлов нет, смотрим ошибку
+            err_msg = capture_logger.error_message or "Unknown Error"
             
-            # Restore essential postprocessors
-            if 'postprocessors' in self.options:
-                retry_opts['postprocessors'].extend(self.options['postprocessors'])
-            elif not skip_conversion:
-                retry_opts['postprocessors'].append({'key': 'FFmpegVideoConvertor', 'preferedformat': 'mp4'})
-            
-            if ffmpeg_location: 
-                retry_opts['ffmpeg_location'] = ffmpeg_location
-
-            await loop.run_in_executor(None, lambda: self._run_yt_dlp(retry_opts))
-            files = self._get_files()
-
-            if not files:
-                err = capture_logger_2.error_message or capture_logger.error_message or "Unknown"
-                print(f"❌ [DOWNLOAD] Failed: {err}")
+            if "too large" in str(err_msg):
                 self._safe_remove()
-                return None, None, _clean_error_message(err), None
+                return None, None, "File too large", None
+            
+            print(f"❌ [DOWNLOAD] Failed: {err_msg}")
+            self._safe_remove()
+            return None, None, _clean_error_message(err_msg), None
 
-        # === READ METADATA ===
+        # === УСПЕХ: ЧИТАЕМ МЕТАДАННЫЕ ===
         metadata = {}
         info_json = next((f for f in files if f.endswith('.info.json')), None)
         if info_json:
@@ -158,11 +141,10 @@ class CommonDownloader(ABC):
                     metadata = json.load(f)
             except: pass
             
-        # Clean list (remove json/tmp)
+        # Чистим список от json и мусора
         clean_files = [f for f in files if not f.endswith('.info.json')]
 
         print(f"✅ [DOWNLOAD] Success. Files: {len(clean_files)}")
-        # RETURN 4 VALUES
         return clean_files, self.download_path, None, metadata
 
     def _run_yt_dlp(self, opts):
@@ -180,15 +162,6 @@ class CommonDownloader(ABC):
                     fp = os.path.join(root, f)
                     if os.path.getsize(fp) > 0: found.append(fp)
         return found
-
-    def _clean_folder(self):
-        for f in os.listdir(self.download_path):
-            if f != "user.txt":
-                try:
-                    p = os.path.join(self.download_path, f)
-                    if os.path.isfile(p): os.remove(p)
-                    else: shutil.rmtree(p)
-                except: pass
 
     def _safe_remove(self):
         try:

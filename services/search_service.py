@@ -3,7 +3,6 @@ import traceback
 import yt_dlp
 from youtubesearchpython import VideosSearch
 
-# УБРАЛИ ИМПОРТ verbose_logger
 
 async def search_music(query: str, limit: int = 5):
     print(f"🔍 [SEARCH] Запрос: '{query}'") # Обычный принт

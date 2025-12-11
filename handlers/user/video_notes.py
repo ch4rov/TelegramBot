@@ -12,31 +12,32 @@ from .router import user_router, check_access_and_update
 from services.platforms.TelegramDownloader.videomessage_converter import convert_to_video_note
 from services.platforms.TelegramDownloader.workflow import IS_ENABLED as VIDEO_NOTE_ENABLED
 from states import VideoNoteState
-import messages as msg 
+from languages import t
 
 @user_router.message(Command("videomessage"))
 async def cmd_videomessage(message: types.Message, state: FSMContext):
-    # ИСПРАВЛЕНО: передаем message.from_user
     can, _, _, _ = await check_access_and_update(message.from_user, message)
     if not can: return
     
     if not VIDEO_NOTE_ENABLED:
-        await message.answer("⚠️ Функция временно отключена.")
+        await message.answer("⚠️ Feature disabled.")
         return
 
-    await message.answer(msg.MSG_VIDEO_MESSAGE, parse_mode="HTML")
+    text = await t(message.from_user.id, 'vn_start')
+    await message.answer(text, parse_mode="HTML")
     await state.set_state(VideoNoteState.waiting_for_video)
 
 @user_router.message(VideoNoteState.waiting_for_video, F.video)
 async def process_video_note(message: types.Message, state: FSMContext):
     await state.clear() 
     video = message.video
+    user_id = message.from_user.id
     
     if video.file_size > 50 * 1024 * 1024: 
-        await message.answer("❌ Видео слишком большое (>50 МБ).")
+        await message.answer(await t(user_id, 'vn_too_large'))
         return
 
-    msg = await message.answer("⏳ Скачиваю через Cloud API...")
+    msg_wait = await message.answer(await t(user_id, 'vn_processing'))
     await message.bot.send_chat_action(message.chat.id, ChatAction.RECORD_VIDEO_NOTE)
     
     unique_id = str(uuid4())
@@ -61,10 +62,10 @@ async def process_video_note(message: types.Message, state: FSMContext):
             )
         except:
             await cloud_bot.send_video_note(chat_id=message.chat.id, video_note=FSInputFile(output_path))
-        await msg.delete()
+        await msg_wait.delete()
         
     except Exception as e:
-        await msg.edit_text(f"❌ Ошибка: {e}")
+        await msg_wait.edit_text(await t(user_id, 'vn_error'))
         print(f"Video Note Error: {e}")
     finally:
         await cloud_session.close()

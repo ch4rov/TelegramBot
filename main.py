@@ -5,21 +5,19 @@ import shutil
 import os
 import time
 import requests
+import settings 
 from loader import bot, dp
-from services.database_service import init_db
-from logs.logger import send_log
+from core.logger_system import send_log, DBLoggingMiddleware
 from aiogram import types, F
+from aiogram.enums import MessageEntityType
 from aiogram.types import BotCommand, BotCommandScopeDefault, BotCommandScopeChat
 from aiogram.dispatcher.middlewares.base import BaseMiddleware
 from aiogram.exceptions import TelegramNetworkError
 from languages import LANGUAGES
-import settings 
-from services.database_service import get_module_status
+from services.database_service import init_db, get_module_status, get_system_value, log_message_to_db
 from services.web_dashboard import run_web_server
-from services.database_service import get_system_value
 from core.queue_manager import queue_manager
 from handlers import user, admin, inline_handler, search_handler
-from middlewares import AccessMiddleware, DBLoggingMiddleware
 from core.installs.ffmpeg_installer import check_and_install_ffmpeg 
 from services.placeholder_service import ensure_placeholders
 
@@ -27,6 +25,7 @@ logging.getLogger('aiogram').setLevel(logging.WARNING)
 logging.getLogger('aiohttp').setLevel(logging.WARNING)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s | %(message)s', datefmt='%H:%M:%S')
 
+# --- ЛОГГЕР КОНСОЛИ (Принты) ---
 class ConsoleLoggerMiddleware(BaseMiddleware):
     async def __call__(self, handler, event, data):
         if isinstance(event, types.Update) and event.message:
@@ -37,6 +36,59 @@ class ConsoleLoggerMiddleware(BaseMiddleware):
             username = u.username or u.first_name or "unknown"
             print(f"📨 @{username}({u.id}): {text}", flush=True)
         return await handler(event, data)
+
+class GroupLoggingMiddleware(BaseMiddleware):
+    async def __call__(self, handler, event, data):
+        if not isinstance(event, types.Update) or not event.message:
+            return await handler(event, data)
+
+        message = event.message
+
+        if message.chat.type not in {'group', 'supergroup'}:
+            return await handler(event, data)
+
+        should_log = False
+        log_type = ""
+
+        if message.reply_to_message:
+            should_log = True
+            log_type = f"[REPLY to {message.reply_to_message.message_id}]"
+
+        if not should_log and (message.entities or message.caption_entities):
+            all_entities = (message.entities or []) + (message.caption_entities or [])
+            for entity in all_entities:
+                if entity.type in [MessageEntityType.URL, MessageEntityType.TEXT_LINK, MessageEntityType.MENTION]:
+                    should_log = True
+                    log_type = "[LINK/TAG]"
+                    break
+
+        if should_log:
+            user = message.from_user
+            text_content = message.text or message.caption or "[Media]"
+            username = user.username or user.first_name or "Unknown"
+            
+            # 1. Пишем в TXT (Файловая система)
+            # Текст для лога формируем тут, но пометки [FROM GROUP] добавит сам логгер
+            log_text = f"{log_type} Text: {text_content}"
+            
+            asyncio.create_task(send_log(
+                log_text, 
+                user_id=user.id, 
+                chat_id=message.chat.id,
+                username=username # Передаем имя для красоты
+            ))
+
+            # 2. Пишем в USERS.DB (База данных)
+            asyncio.create_task(log_message_to_db(
+                user_id=user.id,
+                chat_id=message.chat.id,
+                username=username,
+                text=text_content,
+                msg_type=log_type
+            ))
+
+        return await handler(event, data)
+
 
 def clean_downloads_on_startup():
     if not os.path.exists(settings.DOWNLOADS_DIR):
@@ -70,8 +122,6 @@ async def set_ui_commands(bot):
         elif cat.startswith("admin"):
             admin_commands.append(command)
     if await get_module_status("TelegramVideo"):
-        # Описание можно взять из languages, если сделать get_string, но пока хардкод или из settings
-        # Добавляем вручную
         vn_cmd = BotCommand(command="videomessage", description="📹 Video Note")
         user_commands.append(vn_cmd)
         admin_commands.append(vn_cmd)
@@ -82,45 +132,36 @@ async def set_ui_commands(bot):
         try: await bot.set_my_commands(admin_commands, scope=BotCommandScopeChat(chat_id=int(admin_id)))
         except: pass
 
-# --- МОНИТОР 1: СЛЕДИМ ЗА ПАДЕНИЕМ (На локалке) ---
 async def monitor_local_alive():
-    """Проверяет доступность локального сервера каждые 10 сек"""
     print("🛡 [MONITOR] Слежу за здоровьем локального сервера...")
     while True:
         await asyncio.sleep(10)
         try:
             loop = asyncio.get_running_loop()
-            # Таймаут 5 секунд (чтобы не паниковать раньше времени)
             await loop.run_in_executor(None, lambda: requests.get(settings.LOCAL_SERVER_URL, timeout=5))
         except Exception as e:
             print(f"\n🚨 [MONITOR] Локальный сервер упал! Ошибка: {e}")
             print("🔄 Аварийное переключение на облако...")
             with open(settings.FORCE_CLOUD_FILE, "w") as f: f.write("1")
-            sys.exit(65) # Рестарт
+            sys.exit(65)
 
-# --- МОНИТОР 2: СЛЕДИМ ЗА ВОСКРЕШЕНИЕМ (В облаке) ---
 async def monitor_cloud_recovery():
-    """Проверяет, не ожил ли локальный сервер"""
     target_url = os.getenv("LOCAL_SERVER_URL")
     if not target_url: return
 
     print(f"🚑 [RECOVERY] Жду восстановления сервера: {target_url}")
     
     while True:
-        await asyncio.sleep(30) # Проверка раз в 30 сек
+        await asyncio.sleep(30)
         try:
             loop = asyncio.get_running_loop()
-            # Таймаут 5 секунд
             await loop.run_in_executor(None, lambda: requests.get(target_url, timeout=5))
             
-            # Если сервер ответил:
             print("\n🎉 [RECOVERY] Локальный сервер ожил! Удаляю флаг и перезагружаю...")
             
-            # 1. Удаляем флаг (ОБЯЗАТЕЛЬНО)
             if os.path.exists(settings.FORCE_CLOUD_FILE):
                 os.remove(settings.FORCE_CLOUD_FILE)
             
-            # 2. Уведомляем админа
             if settings.ADMIN_ID:
                 try:
                     await bot.send_message(
@@ -128,14 +169,12 @@ async def monitor_cloud_recovery():
                         "✅ <b>Локальный сервер снова в строю!</b>\nПереключаюсь обратно.",
                         parse_mode="HTML"
                     )
-                    await asyncio.sleep(1) # Даем время на отправку
+                    await asyncio.sleep(1)
                 except: pass
 
-            # 3. Рестарт
             sys.exit(65)
             
         except Exception:
-            # Сервер лежит, ждем дальше
             pass
 
 async def main():
@@ -163,9 +202,12 @@ async def main():
         await run_web_server()
         print("🌐 ВКЛЮЧЕН WEB DASHBOARD")
 
+    # --- ПОДКЛЮЧЕНИЕ MIDDLEWARE ---
     dp.update.outer_middleware(DBLoggingMiddleware())
-    dp.update.outer_middleware(AccessMiddleware()) 
     dp.update.outer_middleware(ConsoleLoggerMiddleware())
+    
+    # Подключаем наш новый логгер групп (он пропустит сообщение дальше к скачиванию)
+    dp.update.outer_middleware(GroupLoggingMiddleware())
     
     @dp.message(F.command == "return_local")
     async def cmd_return_local(message: types.Message):
@@ -177,6 +219,8 @@ async def main():
         else:
             await message.answer("⚠️ Бот уже в штатном режиме.")
 
+    # Хендлера для групп здесь больше нет, он теперь Middleware
+    
     dp.include_router(admin.admin_router)
     dp.include_router(search_handler.router)
     dp.include_router(inline_handler.router)
@@ -191,9 +235,9 @@ async def main():
         settings.STARTUP_ERROR_MESSAGE = None
     settings.START_TIME = time.time()
     print("🚀 Бот запущен!")
-    await send_log("SYSTEM", f"Запуск ({'LOCAL' if settings.USE_LOCAL_SERVER else 'CLOUD'}).")
     
-    # ЗАПУСК МОНИТОРА
+    await send_log(f"[SYSTEM] Запуск ({'LOCAL' if settings.USE_LOCAL_SERVER else 'CLOUD'}).")
+    
     if settings.USE_LOCAL_SERVER:
         asyncio.create_task(monitor_local_alive())
     elif os.path.exists(settings.FORCE_CLOUD_FILE):
@@ -202,7 +246,6 @@ async def main():
     await bot.delete_webhook(drop_pending_updates=True)
     
     try:
-        # Polling с таймаутом
         await dp.start_polling(bot, polling_timeout=10)
         
     except (TelegramNetworkError, Exception) as e:
@@ -216,7 +259,7 @@ async def main():
             
     finally:
         await bot.session.close()
-        await send_log("SYSTEM", "Система остановлена.")
+        await send_log("[SYSTEM] Система остановлена.")
         print("Бот остановлен.")
 
 if __name__ == "__main__":
