@@ -132,18 +132,6 @@ IS_TEST_ENV = IS_TEST_ENV_STR in ["true", "1", "yes", "on"]
 TARGET_TOKEN_KEY = "TEST_BOT_TOKEN" if IS_TEST_ENV else "BOT_TOKEN"
 BOT_TOKEN = os.getenv(TARGET_TOKEN_KEY)
 
-if not BOT_TOKEN:
-    print(f"\n❌ {TARGET_TOKEN_KEY} не найден в настройках.")
-    print("💡 Вставьте токен бота (от @BotFather).")
-    
-    # Спрашиваем токен
-    BOT_TOKEN = ask_user("Вставьте токен и нажмите Enter")
-    
-    # Сохраняем в файл и обновляем переменную окружения
-    save_key_to_env(TARGET_TOKEN_KEY, BOT_TOKEN)
-    os.environ[TARGET_TOKEN_KEY] = BOT_TOKEN
-    print("✅ Токен сохранен!\n")
-
 # --- ID АДМИНА ---
 ADMIN_ID_RAW = os.getenv("ADMIN_ID", "")
 clean_admin = ADMIN_ID_RAW.replace('"', '').replace("'", "").strip()
@@ -183,11 +171,14 @@ TECH_CHAT_ID = os.getenv("TECH_CHAT_ID")
 LOG_CHANNEL_ID = None 
 
 LASTFM_API_KEY = os.getenv("LASTFM_API_KEY")
+LASTFM_API_URL = "http://ws.audioscrobbler.com/2.0/"
+LASTFM_SECRET = os.getenv("LASTFM_SECRET")
 
 # Local Server
-USE_LOCAL_SERVER = get_bool("USE_LOCAL_SERVER", False)
-LOCAL_SERVER_URL = os.getenv("LOCAL_SERVER_URL", "http://127.0.0.1:8081")
+USE_LOCAL_SERVER = os.getenv("USE_LOCAL_SERVER", "False").lower() == "true"
+LOCAL_SERVER_URL = os.getenv("LOCAL_SERVER_URL")
 
+DB_NAME = "users.db"
 # Webhook
 USE_WEBHOOK = get_bool("USE_WEBHOOK", False)
 WEBHOOK_HOST = os.getenv("WEBHOOK_HOST", "0.0.0.0")

@@ -20,8 +20,6 @@ def load_languages():
                     loaded_codes.append(lang_code)
             except Exception as e:
                 print(f"❌ [LANG] Ошибка {filename}: {e}")
-
-    # ВЫВОД В ОДНУ СТРОКУ
     print(f"🌐 [LANG] Загружены языки: {', '.join(loaded_codes)}")
 
 async def t(user_id, key, **kwargs):

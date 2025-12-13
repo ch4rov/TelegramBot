@@ -1,212 +1,134 @@
 import os
 import shutil
-import traceback
 import html
-import json
-import re  # <--- ДОБАВЛЕН ИМПОРТ
 from aiogram import Router, F, types
-from aiogram.types import FSInputFile, InputMediaPhoto, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import FSInputFile
 from aiogram.enums import ChatAction
-from copy import copy
-
-from services.database_service import add_or_update_user
-from services.platforms.platform_manager import download_content
+from loader import bot
+from services.platforms.platform_manager import download_content, is_valid_url
 import settings
-
-print("📢 [SYSTEM] Модуль handlers/search_handler.py загружен!")
 
 router = Router()
 
-def make_caption(title_text, url):
-    bot_name = settings.BOT_USERNAME or "ch4roff_bot"
-    bot_link = f"@{bot_name}"
-    if not title_text: return bot_link
-    safe_title = html.escape(title_text)
-    return f'<a href="{url}">{safe_title}</a>\n\n{bot_link}'
+# Лимиты в байтах
+LIMIT_PUBLIC = 49 * 1024 * 1024       # ~49 MB (с запасом)
+LIMIT_LOCAL = 1990 * 1024 * 1024      # ~1.95 GB
 
-@router.callback_query(F.data == "delete_msg")
-async def delete_message(callback: types.CallbackQuery):
-    try: await callback.message.delete()
-    except: pass
-
-# --- КЛИПЫ (ВИДЕО) ---
-@router.callback_query(F.data.startswith("get_clip:"))
-async def handle_get_clip(callback: types.CallbackQuery):
-    try:
-        video_id = callback.data.split(":")[1]
-        url = f"https://youtu.be/{video_id}"
-    except IndexError:
-        await callback.answer("❌ Ошибка ID")
-        return
+@router.message(F.text)
+async def message_handler(message: types.Message):
+    text = message.text.strip()
+    user_id = message.from_user.id
     
-    await callback.answer("🎬 Загружаю клип...")
-    try:
-        await callback.message.edit_caption(
-            caption=f"⏳ Загрузка <a href=\"{url}\">клипа</a>...", 
-            parse_mode="HTML", reply_markup=None
-        )
-    except: pass
+    if text.startswith("/"): return
 
-    custom_opts = {'force_video': True}
-    
-    # Распаковка 4 значений
-    files, folder_path, error, meta = await download_content(url, custom_opts)
-
-    if error:
-        try: await callback.message.edit_caption(caption=f"❌ Ошибка: {error}")
-        except: pass
-        if folder_path: shutil.rmtree(folder_path, ignore_errors=True)
-        return
-
-    try:
-        await callback.bot.send_chat_action(chat_id=callback.message.chat.id, action=ChatAction.UPLOAD_VIDEO)
+    if is_valid_url(text):
+        status_msg = await message.answer("⏳ <b>Анализирую ссылку...</b>", parse_mode="HTML")
         
-        # Ищем видео
-        video_file = next((f for f in files if f.endswith(('.mp4', '.mov', '.mkv', '.webm'))), None)
-        if not video_file: raise Exception("Video file not found")
+        # --- ОПРЕДЕЛЯЕМ ЛИМИТЫ И ФОРМАТ ---
+        is_local = getattr(settings, 'USE_LOCAL_SERVER', False)
+        current_limit = LIMIT_LOCAL if is_local else LIMIT_PUBLIC
         
-        clean_title = ""
-        # 1. Пробуем из метаданных (переданных из загрузчика)
-        if meta:
-            clean_title = meta.get('title')
-
-        # 2. Если нет, пробуем читать JSON с диска
-        if not clean_title:
-            info_json_file = next((f for f in files if f.endswith(('.info.json'))), None)
-            if info_json_file:
-                try:
-                    with open(info_json_file, 'r', encoding='utf-8') as f:
-                        info = json.load(f)
-                        if info.get('title'): clean_title = info.get('title')
-                except: pass
-        
-        # 3. Fallback на имя файла
-        if not clean_title:
-             fname = os.path.basename(video_file)
-             clean_title = os.path.splitext(fname)[0]
-             # Чистка
-             clean_title = re.sub(r'\[.*?\]', '', clean_title).strip()
-             if "_" in clean_title and " " not in clean_title:
-                 clean_title = clean_title.replace("_", " ")
-
-        final_caption = make_caption(clean_title, url)
-        
-        await callback.message.reply_video(
-            FSInputFile(video_file),
-            caption=final_caption,
-            parse_mode="HTML",
-            thumbnail=None, 
-            supports_streaming=True
-        )
-        
-        try:
-            await callback.message.edit_caption(caption=final_caption, parse_mode="HTML", reply_markup=None)
-        except: pass
-        
-    except Exception as e:
-        try: await callback.message.answer(f"⚠️ Не удалось отправить видео: {e}")
-        except: pass
-    
-    finally:
-        if folder_path and os.path.exists(folder_path):
-            shutil.rmtree(folder_path, ignore_errors=True)
-
-# --- МУЗЫКА (АУДИО) ---
-@router.callback_query(F.data.startswith("music:"))
-async def handle_music_selection(callback: types.CallbackQuery):
-    try:
-        data_parts = callback.data.split(":", 2)
-        if len(data_parts) < 3:
-            await callback.answer("❌ Ошибка данных")
-            return
-            
-        source = data_parts[1]
-        content_id = data_parts[2]
-        
-        if source == "YT": url = f"https://youtu.be/{content_id}"
-        elif source == "SC": url = f"https://soundcloud.com/{content_id}"
-        else: return
-
-        user = callback.from_user
-        await add_or_update_user(user.id, user.username)
-        await callback.answer("🎧 Начинаю загрузку...")
-        
-        try: await callback.message.edit_text(f"📥 <b>Скачиваю трек...</b>\n<code>{url}</code>", reply_markup=None, parse_mode="HTML")
-        except: await callback.message.answer(f"📥 <b>Скачиваю...</b>", parse_mode="HTML")
+        if is_local:
+            # Локальный сервер: Качаем максимум
+            format_str = 'bestvideo+bestaudio/best'
+        else:
+            # Публичный API: Пытаемся найти лучшее качество, но НЕ БОЛЕЕ 50МБ
+            # Если не найдет <50МБ, скачает 'worst' (худшее), чтобы хоть что-то отправить
+            format_str = 'best[filesize<50M]/bestvideo[filesize<40M]+bestaudio/best[height<=480]/worst'
 
         custom_opts = {
-            'format': 'bestaudio/best',
-            'postprocessors': [{'key': 'EmbedThumbnail'}, {'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '192'}]
+            'format': format_str,
+            'merge_output_format': 'mp4',
+            'postprocessors': [{'key': 'EmbedThumbnail'}, {'key': 'FFmpegMetadata'}],
+            'writethumbnail': True,
+            'noplaylist': True
         }
-        
-        # Распаковка 4 значений
-        files, folder_path, error, meta = await download_content(url, custom_opts)
+
+        # Качаем
+        files, folder_path, error, meta = await download_content(text, custom_opts)
 
         if error:
-            try: await callback.message.edit_text(f"❌ Ошибка: {error}")
+            try: await status_msg.edit_text(f"❌ <b>Ошибка:</b> {html.escape(error)}", parse_mode="HTML")
             except: pass
+            if folder_path: shutil.rmtree(folder_path, ignore_errors=True)
             return
 
-        await callback.bot.send_chat_action(chat_id=callback.message.chat.id, action=ChatAction.UPLOAD_VOICE)
-        
-        # Ищем аудио (Расширенный список!)
-        target = next((f for f in files if f.endswith(('.mp3', '.m4a', '.ogg', '.wav', '.webm', '.opus'))), None)
-        thumb = next((f for f in files if f.endswith(('.jpg', '.png', '.webp'))), None)
+        try:
+            # Фильтр файлов
+            media_files = []
+            thumb_file = None
+            for f in files:
+                ext = os.path.splitext(f)[1].lower()
+                if ext in ['.jpg', '.jpeg', '.png', '.webp']: thumb_file = f
+                elif ext in ['.mp4', '.mov', '.mkv', '.webm', '.avi', '.mp3', '.m4a', '.wav', '.flac', '.ogg']:
+                    media_files.append(f)
 
-        if not target: 
-            # Логируем файлы, чтобы понять почему не нашли
-            print(f"❌ [SEARCH ERROR] Файлы в папке: {files}")
-            raise Exception("Файл не создан (или неверный формат)")
+            if not media_files:
+                await status_msg.edit_text("❌ Медиафайлы не найдены.")
+                return
 
-        # --- МЕТАДАННЫЕ ---
-        if not meta: meta = {}
-        meta_artist = meta.get('artist') or meta.get('uploader')
-        meta_title = meta.get('track') or meta.get('title')
+            target_file = media_files[0]
+            filename = os.path.basename(target_file)
+            ext = os.path.splitext(target_file)[1].lower()
+            file_size = os.path.getsize(target_file)
 
-        # Если мета пустая, пробуем читать JSON с диска
-        if not meta_title:
-            info_json_file = next((f for f in files if f.endswith(('.info.json'))), None)
-            if info_json_file:
-                try:
-                    with open(info_json_file, 'r', encoding='utf-8') as f:
-                        info = json.load(f)
-                        meta_artist = info.get('artist') or info.get('uploader')
-                        meta_title = info.get('track') or info.get('title')
+            # --- ГЛАВНАЯ ПРОВЕРКА РАЗМЕРА ---
+            if file_size > current_limit:
+                limit_str = "2 GB" if is_local else "50 MB"
+                size_str = f"{file_size / (1024*1024):.1f} MB"
+                await status_msg.edit_text(
+                    f"⚠️ <b>Файл слишком большой!</b>\n"
+                    f"Размер: {size_str}\n"
+                    f"Лимит бота: {limit_str}\n\n"
+                    f"<i>Попробуйте на локальном сервере или выберите видео короче.</i>",
+                    parse_mode="HTML"
+                )
+                return
+            # --------------------------------
+
+            media_input = FSInputFile(target_file, filename=filename)
+            thumb_input = FSInputFile(thumb_file) if thumb_file else None
+
+            if not meta: meta = {}
+            title = meta.get('title', filename)
+            artist = meta.get('artist') or meta.get('uploader')
+            
+            caption = f'<a href="{text}">{html.escape(title)}</a>'
+            if artist: caption = f"<b>{html.escape(artist)}</b> - " + caption
+            bot_username = getattr(settings, 'BOT_USERNAME', 'bot')
+            caption += f"\n\n@{bot_username}"
+
+            sent_message = None
+            
+            # Отправка
+            if ext in ['.mp3', '.m4a', '.wav', '.flac', '.ogg']:
+                await bot.send_chat_action(user_id, ChatAction.UPLOAD_VOICE)
+                sent_message = await message.answer_audio(
+                    media_input, caption=caption, parse_mode="HTML",
+                    thumbnail=thumb_input, title=title, performer=artist
+                )
+            elif ext in ['.mp4', '.mov']:
+                await bot.send_chat_action(user_id, ChatAction.UPLOAD_VIDEO)
+                sent_message = await message.answer_video(
+                    media_input, caption=caption, parse_mode="HTML",
+                    thumbnail=thumb_input, supports_streaming=True,
+                    width=meta.get('width'), height=meta.get('height'), duration=meta.get('duration')
+                )
+            else:
+                await bot.send_chat_action(user_id, ChatAction.UPLOAD_DOCUMENT)
+                sent_message = await message.answer_document(
+                    media_input, caption=caption, parse_mode="HTML", thumbnail=thumb_input
+                )
+
+            if sent_message:
+                try: await status_msg.delete()
                 except: pass
+            else:
+                await status_msg.edit_text("⚠️ Не удалось отправить файл (ошибка API).")
 
-        filename = os.path.basename(target)
-        bot_name = settings.BOT_USERNAME or "ch4roff_bot"
-        performer = f"@{bot_name}"
-        
-        # Чистим имя файла от [ID]
-        raw_name = os.path.splitext(filename)[0]
-        clean_name = re.sub(r'\[.*?\]', '', raw_name).strip()
-        
-        title = meta_title or clean_name
-
-        if meta_artist:
-            performer = meta_artist
-        elif " - " in title:
-             p_parts = title.split(" - ", 1)
-             performer, title = p_parts[0], p_parts[1]
-
-        caption_text = make_caption(f"{performer} - {title}", url)
-
-        await callback.message.answer_audio(
-            FSInputFile(target),
-            caption=caption_text,
-            parse_mode="HTML",
-            thumbnail=FSInputFile(thumb) if thumb else None,
-            performer=performer,
-            title=title
-        )
-        
-        try: await callback.message.delete()
-        except: pass
-
-    except Exception as e:
-        print(f"🔥 [SEARCH ERROR] {traceback.format_exc()}")
-        try: await callback.message.answer(f"⚠️ Ошибка: {e}")
-        except: pass
-    finally:
-        if folder_path and os.path.exists(folder_path): shutil.rmtree(folder_path, ignore_errors=True)
+        except Exception as e:
+            print(f"Error sending direct link: {e}")
+            try: await status_msg.edit_text(f"⚠️ Ошибка отправки: {e}")
+            except: pass
+        finally:
+            if folder_path and os.path.exists(folder_path): shutil.rmtree(folder_path, ignore_errors=True)

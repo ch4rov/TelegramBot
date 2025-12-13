@@ -2,11 +2,8 @@ import aiohttp
 import settings
 
 async def get_user_recent_track(username: str):
-    """
-    Возвращает текущий или последний трек пользователя.
-    Вернет словарь: {'artist': '...', 'track': '...', 'image': '...', 'now_playing': Bool}
-    """
-    if not username: return None
+    if not username or not getattr(settings, 'LASTFM_API_KEY', None):
+        return None
     
     params = {
         'method': 'user.getrecenttracks',
@@ -15,27 +12,35 @@ async def get_user_recent_track(username: str):
         'format': 'json',
         'limit': 1
     }
+
+    url = getattr(settings, 'LASTFM_API_URL', "http://ws.audioscrobbler.com/2.0/")
     
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.get(settings.LASTFM_API_URL, params=params) as resp:
+            async with session.get(url, params=params) as resp:
+                if resp.status != 200:
+                    return None
+
                 data = await resp.json()
                 
                 if 'recenttracks' in data and 'track' in data['recenttracks']:
                     tracks = data['recenttracks']['track']
-                    if not tracks: return None
+                    if not tracks:
+                        return None
                     
                     track = tracks[0]
-                    artist = track['artist']['#text']
-                    name = track['name']
+                    artist = track.get('artist', {}).get('#text', 'Unknown')
+                    name = track.get('name', 'Unknown')
                     
-                    # Проверка: играет ли сейчас?
                     now_playing = False
-                    if '@attr' in track and track['@attr'].get('nowplaying') == 'true':
+                    attr = track.get('@attr')
+                    if attr and attr.get('nowplaying') == 'true':
                         now_playing = True
                         
-                    # Картинка (Large)
-                    image = track['image'][2]['#text'] if 'image' in track else None
+                    image = None
+                    images = track.get('image', [])
+                    if len(images) > 2:
+                        image = images[2].get('#text')
                     
                     return {
                         'artist': artist,

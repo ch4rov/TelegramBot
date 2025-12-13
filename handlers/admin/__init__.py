@@ -1,5 +1,5 @@
-from .router import admin_router
-# Импортируем модули, чтобы их хендлеры зарегистрировались в роутере
-from . import system, moderation, testing
+from aiogram import Router
+from . import system  # <-- Вот это самое важное!
 
-__all__ = ["admin_router"]
+admin_router = Router()
+admin_router.include_router(system.router)

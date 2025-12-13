@@ -5,9 +5,10 @@ from aiogram.filters import Command
 
 # Импортируем наши настройки и сервисы
 import settings
+# ИСПРАВЛЕННЫЕ ИМПОРТЫ (из core, а не services)
 from core.logger_system import send_log
-from services.database_service import clear_file_cache, set_system_value
 from core.queue_manager import queue_manager
+from services.database_service import clear_file_cache, set_system_value
 
 router = Router()
 
@@ -58,7 +59,6 @@ async def cmd_update(message: types.Message):
         await send_log("ADMIN", f"Force Update executed: {commit_msg}", admin=message.from_user)
         
         # 4. Выход с кодом 65 (Команда для раннера перезапустить процесс)
-        # Если раннера нет, бот просто выключится.
         sys.exit(65) 
 
     except Exception as e:
@@ -85,7 +85,6 @@ async def cmd_clearcache(message: types.Message):
             return
 
     if minutes > 0:
-        # Импортируем внутри функции, на случай если этой функции нет в старой версии БД
         try:
             from services.database_service import clear_cache_older_than
             await clear_cache_older_than(minutes)
@@ -109,8 +108,10 @@ async def cmd_limit(message: types.Message):
     # Если просто /limit - показываем статус
     if len(args) == 1:
         mode = queue_manager.limit_mode
-        # Считаем активные задачи
-        active = sum(len(tasks) for tasks in queue_manager.user_tasks.values())
+        try:
+            active = sum(len(tasks) for tasks in queue_manager.user_tasks.values())
+        except:
+            active = 0
         
         text = (
             f"🚦 <b>Limit Status:</b>\n"

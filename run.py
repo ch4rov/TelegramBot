@@ -2,8 +2,11 @@ import os
 import sys
 import time
 import subprocess
+from core.installs.ffmpeg_installer import check_and_install_ffmpeg
 
 def main():
+    check_and_install_ffmpeg()
+
     while True:
         print("\n🔋 [RUNNER] Запуск main.py...")
         process = subprocess.Popen([sys.executable, "main.py"])
@@ -14,9 +17,7 @@ def main():
             print("\n🛑 Останавливаю бота...")
             process.terminate()
             
-            # --- ЧИСТКА ПРОЦЕССОВ ПРИ ВЫХОДЕ ---
             try:
-                # На Windows убиваем дерево процессов принудительно
                 subprocess.run(f"taskkill /F /T /PID {process.pid}", shell=True, stderr=subprocess.DEVNULL)
             except: pass
             
