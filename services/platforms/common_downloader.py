@@ -19,21 +19,14 @@ class ErrorCaptureLogger:
 
 def _clean_error_message(error_text: str) -> str:
     if not error_text: return "Unknown Error"
-
     if "Instagram sent an empty media response" in str(error_text):
         return "Instagram Post Unavailable. Possibly Private or Deleted."
-
     ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
     text = ansi_escape.sub('', str(error_text))
-    
     if "ERROR:" in text: 
         parts = text.split("ERROR:", 1)
         if len(parts) > 1: text = parts[1].strip()
-    
-    lines = text.split('\n')
-    # Filter out traceback lines
-    clean_lines = [line for line in lines if "Traceback" not in line and "File " not in line and line.strip()]
-    return " ".join(clean_lines[:2])
+    return text.split('\n')[0]
 
 class CommonDownloader(ABC):
     def __init__(self, url: str):
@@ -50,7 +43,6 @@ class CommonDownloader(ABC):
         pass
 
     async def download(self):
-        # 1. FFmpeg Check
         base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         local_ffmpeg = os.path.join(base_dir, "core", "installs", "ffmpeg.exe")
         
@@ -60,39 +52,70 @@ class CommonDownloader(ABC):
         elif shutil.which("ffmpeg"): 
             ffmpeg_location = None
         else:
-            print(f"❌ [SYSTEM] FFmpeg not found!")
             return None, None, "System Error: FFmpeg missing.", None
 
         if not os.path.exists(self.download_path): 
             os.makedirs(self.download_path)
 
-        skip_conversion = self.options.get('skip_conversion', False)
         user_cookie_content = self.options.get('user_cookie_content')
-
         capture_logger = ErrorCaptureLogger()
         ydl_opts = self.get_platform_settings()
         
-        # --- НАСТРОЙКА (СРАЗУ SAFE MODE) ---
         ydl_opts.update({
             'outtmpl': f'{self.download_path}/%(id)s.%(ext)s',
             'max_filesize': settings.MAX_FILE_SIZE,
             'logger': capture_logger,
             'quiet': True,
-            # Оставляем True для получения обложки, но не конвертируем её жестко
-            'writethumbnail': True, 
             'writeinfojson': True, 
             'overwrites': True,
-            'force_overwrites': True,
-            'socket_timeout': 20,
+            'socket_timeout': 15,
             'trim_file_name': 200,
-            # Инициализируем пустой список постпроцессоров, чтобы добавить только нужное
             'postprocessors': []
         })
+
+        is_yt_music = "music.youtube.com" in self.url
+        is_twitch = "twitch.tv" in self.url
+        is_spotify = "http://googleusercontent.com/spotify.com" in self.url
+        is_soundcloud = "soundcloud.com" in self.url
+
+        if is_yt_music or is_spotify or is_soundcloud:
+            # === AUDIO MODE ===
+            ydl_opts['format'] = 'bestaudio/best'
+            ydl_opts['writethumbnail'] = False 
+            
+            ydl_opts['postprocessors'] = [{
+                'key': 'FFmpegExtractAudio',
+                'preferredcodec': 'mp3',
+                'preferredquality': '192',
+            }]
+            
+        elif is_twitch:
+            # === TWITCH SIMPLE MODE (Как раньше) ===
+            ydl_opts['writethumbnail'] = True
+            
+            # 1. Просим yt-dlp сразу найти mp4, чтобы не конвертировать
+            ydl_opts['format'] = 'best[ext=mp4]/best'
+            
+            # 2. УБИРАЕМ ВСЕ СЛОЖНЫЕ ФИЛЬТРЫ FFMPEG
+            # Оставляем пустой список пост-процессоров для видео, 
+            # yt-dlp сам склеит звук и видео, если они пойдут отдельными потоками.
+            
+            # Единственное, что оставим — это получение картинки (обложки)
+            ydl_opts['postprocessors'].append({'key': 'FFmpegThumbnailsConvertor', 'format': 'jpg'})
+
+        else:
+            # === STANDARD VIDEO ===
+            ydl_opts['writethumbnail'] = True
+            ydl_opts['format'] = 'bestvideo+bestaudio/best'
+            ydl_opts['merge_output_format'] = 'mp4'
+            
+            ydl_opts['postprocessors'].append({'key': 'FFmpegVideoConvertor', 'preferedformat': 'mp4'})
+            ydl_opts['postprocessors'].append({'key': 'FFmpegThumbnailsConvertor', 'format': 'jpg'})
+            ydl_opts['postprocessors'].append({'key': 'FFmpegMetadata', 'add_metadata': True})
 
         if ffmpeg_location: 
             ydl_opts['ffmpeg_location'] = ffmpeg_location
 
-        # Добавляем куки
         if user_cookie_content:
             cpath = os.path.join(self.download_path, "user.txt")
             with open(cpath, "w", encoding="utf-8") as f: f.write(user_cookie_content)
@@ -100,39 +123,29 @@ class CommonDownloader(ABC):
         elif os.path.exists("cookies.txt"):
             ydl_opts['cookiefile'] = "cookies.txt"
 
-        # --- ЛОГИКА ПОСТПРОЦЕССИНГА ---
-        # Добавляем конвертацию видео в MP4 (если не отключено)
-        # Это то, что было в "Safe Mode"
-        if not skip_conversion:
-             ydl_opts['postprocessors'].append({
-                 'key': 'FFmpegVideoConvertor', 
-                 'preferedformat': 'mp4'
-             })
-        
-        # Мы убрали 'FFmpegMetadata' и 'FFmpegThumbnailsConvertor', которые были в 1-м способе,
-        # так как они часто вызывают ошибки на специфических видео.
-
-        # === ЗАПУСК СКАЧИВАНИЯ ===
-        print(f"⬇️ [DOWNLOAD] Start: {self.url}")
-        loop = asyncio.get_event_loop()
-        await loop.run_in_executor(None, lambda: self._run_yt_dlp(ydl_opts))
+        try:
+            loop = asyncio.get_event_loop()
+            await asyncio.wait_for(
+                loop.run_in_executor(None, lambda: self._run_yt_dlp(ydl_opts)),
+                timeout=120.0
+            )
+        except asyncio.TimeoutError:
+            self._safe_remove()
+            return None, None, "Timeout: Processing took too long", None
+        except Exception as e:
+            self._safe_remove()
+            return None, None, "Download Error", None
         
         files = self._get_files()
         
-        # Проверка ошибок
         if not files:
-            # Если файлов нет, смотрим ошибку
             err_msg = capture_logger.error_message or "Unknown Error"
-            
             if "too large" in str(err_msg):
                 self._safe_remove()
                 return None, None, "File too large", None
-            
-            print(f"❌ [DOWNLOAD] Failed: {err_msg}")
             self._safe_remove()
             return None, None, _clean_error_message(err_msg), None
 
-        # === УСПЕХ: ЧИТАЕМ МЕТАДАННЫЕ ===
         metadata = {}
         info_json = next((f for f in files if f.endswith('.info.json')), None)
         if info_json:
@@ -141,10 +154,8 @@ class CommonDownloader(ABC):
                     metadata = json.load(f)
             except: pass
             
-        # Чистим список от json и мусора
         clean_files = [f for f in files if not f.endswith('.info.json')]
 
-        print(f"✅ [DOWNLOAD] Success. Files: {len(clean_files)}")
         return clean_files, self.download_path, None, metadata
 
     def _run_yt_dlp(self, opts):

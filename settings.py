@@ -2,9 +2,67 @@ import os
 import time
 from dotenv import load_dotenv
 
+ENV_FILE = ".env"
+ENV_TEMPLATE = """# === TELEGRAM BOT SETTINGS ===
+# Токен от @BotFather
+BOT_TOKEN=
+
+# ID Администраторов через запятую (без пробелов)
+# Пример: ADMIN_IDS=123456789,987654321
+ADMIN_IDS=
+
+# ID канала в Telegram для логов (должен начинаться с -100...)
+# Оставьте пустым, если не нужно
+LOG_CHANNEL_ID=
+
+# === SYSTEM SETTINGS ===
+# True - режим тестов (чистит кэш, пишет в тестовую ветку Discord)
+# False - боевой режим
+IS_TEST_ENV=True
+
+# === DISCORD LOGGING (BOT MODE) ===
+# Включаем логирование через бота Дискорд? (True/False)
+ENABLE_DISCORD_BOT_LOG=True
+
+# Токен Discord бота (Developer Portal -> Bot -> Reset Token)
+DISCORD_BOT_TOKEN=
+
+# ID Ветки (Thread) для ОСНОВНОГО режима (Prod)
+DISCORD_LOG_THREAD_ID_MAIN=0
+
+# ID Ветки (Thread) для ТЕСТОВОГО режима (Test)
+DISCORD_LOG_THREAD_ID_TEST=0
+
+# === DISCORD LOGGING (WEBHOOK MODE - OLD) ===
+# Если хотите использовать вебхук вместо бота (устарело, но поддерживается)
+ENABLE_DISCORD_WEBHOOK_LOG=False
+DISCORD_WEBHOOK_URL=
+
+# === TG WEBHOOK SETTINGS (Optional) ===
+# Используйте это только если ставите бота на VDS с SSL
+USE_WEBHOOK=False
+WEBHOOK_HOST=0.0.0.0
+WEBHOOK_PORT=8080
+WEBHOOK_PATH=/webhook
+"""
+
+if not os.path.exists(ENV_FILE):
+    print(f"⚠️ Файл {ENV_FILE} не найден!")
+    print(f"⚙️ Создаю новый файл {ENV_FILE} с шаблоном настроек...")
+    try:
+        with open(ENV_FILE, "w", encoding="utf-8") as f:
+            f.write(ENV_TEMPLATE)
+        print(f"✅ Файл {ENV_FILE} успешно создан.")
+        print("❗️ ПОЖАЛУЙСТА, ОТКРОЙТЕ .env И ЗАПОЛНИТЕ BOT_TOKEN И ДРУГИЕ ДАННЫЕ.")
+        print("🛑 Бот остановлен.")
+        sys.exit(0) # Останавливаем бота, чтобы не сыпались ошибки
+    except Exception as e:
+        print(f"❌ Ошибка при создании .env: {e}")
+        sys.exit(1)
+
 load_dotenv()
 START_TIME = time.time()
-BOT_VERSION = "2.6"
+BOT_VERSION = "2.7"
 
 # --- ТОКЕНЫ ---
 BOT_TOKEN = os.getenv("BOT_TOKEN")
@@ -35,6 +93,8 @@ USER_MAX_CONCURRENT = 3
 # --- ЛИМИТЫ ---
 MAX_FILE_SIZE = 2000 * 1024 * 1024 if USE_LOCAL_SERVER else 50 * 1024 * 1024
 MAX_CONCURRENT_DOWNLOADS = 3
+DISCORD_LOG_THREAD_ID_MAIN = 1449438689984909322
+DISCORD_LOG_THREAD_ID_TEST = 1449439061701038264
 
 # --- ПУТИ И API ---
 DOWNLOADS_DIR = "downloads"
@@ -54,7 +114,11 @@ WEB_SERVER_PORT = 8082
 WEB_ADMIN_USER = os.getenv("WEB_ADMIN_USER", "admin")
 WEB_ADMIN_PASS = os.getenv("WEB_ADMIN_PASS", "admin")
 WEB_SECRET_KEY = os.getenv("WEB_SECRET_KEY", "super_secret_cookie_key_123")
-
+DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1443448403026514032/ypNP-_dP3XqWeBIUKwFibShsurjn5oqxYP_VxWkSmtUCPaL99uY5bfPUe3JmdUX4tQb4"
+DISCORD_WEBHOOK_URL_TEST = "https://discord.com/api/webhooks/1443448403026514032/ypNP-_dP3XqWeBIUKwFibShsurjn5oqxYP_VxWkSmtUCPaL99uY5bfPUe3JmdUX4tQb4"
+USE_WEBHOOK = False
+DISCORD_LOG_THREAD_ID_MAIN = 1449438689984909322
+DISCORD_LOG_THREAD_ID_TEST = 1449439061701038264
 SAFE_CHARS = r'[a-zA-Z0-9\-\_\.\/\?\=\&\%\+\~]+'
 
 URL_PATTERNS = [
@@ -103,3 +167,5 @@ MODULES_LIST = [
 
 # Имя бота (заполнится автоматически)
 BOT_USERNAME = None
+
+DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN", "")
