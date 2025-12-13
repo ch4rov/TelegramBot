@@ -1,125 +1,173 @@
 import os
-import time
+import sys
 from dotenv import load_dotenv
 
+# === 1. ГЕНЕРАЦИЯ ШАБЛОНА .ENV ===
 ENV_FILE = ".env"
-ENV_TEMPLATE = """# === TELEGRAM BOT SETTINGS ===
-# Токен от @BotFather
+
+ENV_TEMPLATE = """# ==========================================
+#        ОБЯЗАТЕЛЬНЫЕ НАСТРОЙКИ (CORE)
+# ==========================================
+
+# 1. Режим среды
+# True  = TESTING (Использует TEST_BOT_TOKEN, чистит кэш)
+# False = STABLE  (Использует основной BOT_TOKEN)
+IS_TEST_ENV=False
+
+# 2. Токены Telegram
+# Основной (Stable)
 BOT_TOKEN=
+# Тестовый (Testing)
+TEST_BOT_TOKEN=
 
-# ID Администраторов через запятую (без пробелов)
-# Пример: ADMIN_IDS=123456789,987654321
-ADMIN_IDS=
+# 3. Доступ
+# Ваш ID (Главный админ)
+ADMIN_ID=
+# ID Технического канала (Logs)
+TECH_CHAT_ID=
 
-# ID канала в Telegram для логов (должен начинаться с -100...)
-# Оставьте пустым, если не нужно
-LOG_CHANNEL_ID=
+# 4. API Ключи
+LASTFM_API_KEY=
 
-# === SYSTEM SETTINGS ===
-# True - режим тестов (чистит кэш, пишет в тестовую ветку Discord)
-# False - боевой режим
-IS_TEST_ENV=True
 
-# === DISCORD LOGGING (BOT MODE) ===
-# Включаем логирование через бота Дискорд? (True/False)
-ENABLE_DISCORD_BOT_LOG=True
+# ==========================================
+#  TELEGRAM API: LOCAL SERVER (DOCKER)
+# ==========================================
+# Public Cloud API имеет лимит на отправку файлов 50 МБ.
+# Local Bot API Server (telegram-bot-api в Docker) позволяет слать до 2000 МБ.
+# Включайте только если у вас запущен этот контейнер.
 
-# Токен Discord бота (Developer Portal -> Bot -> Reset Token)
-DISCORD_BOT_TOKEN=
+# Использовать локальный сервер API? (True/False)
+USE_LOCAL_SERVER=False
 
-# ID Ветки (Thread) для ОСНОВНОГО режима (Prod)
-DISCORD_LOG_THREAD_ID_MAIN=0
+# Адрес вашего Docker-контейнера с API (обычно порт 8081)
+# Пример: http://127.0.0.1:8081
+LOCAL_SERVER_URL=http://127.0.0.1:8081
 
-# ID Ветки (Thread) для ТЕСТОВОГО режима (Test)
-DISCORD_LOG_THREAD_ID_TEST=0
 
-# === DISCORD LOGGING (WEBHOOK MODE - OLD) ===
-# Если хотите использовать вебхук вместо бота (устарело, но поддерживается)
-ENABLE_DISCORD_WEBHOOK_LOG=False
-DISCORD_WEBHOOK_URL=
+# ==========================================
+#  TELEGRAM INPUT: WEBHOOK VS POLLING
+# ==========================================
+# Polling (False): Бот сам опрашивает сервера Telegram. (Удобно для разработки)
+# Webhook (True):  Telegram шлет запросы боту. (Нужен "белый" IP/SSL, для VDS)
 
-# === TG WEBHOOK SETTINGS (Optional) ===
-# Используйте это только если ставите бота на VDS с SSL
 USE_WEBHOOK=False
+
+# Настройки для поднятия aiohttp сервера (только если USE_WEBHOOK=True)
 WEBHOOK_HOST=0.0.0.0
 WEBHOOK_PORT=8080
 WEBHOOK_PATH=/webhook
+
+
+# ==========================================
+#       ЛОГИРОВАНИЕ (DISCORD)
+# ==========================================
+
+# --- ВАРИАНТ 1: ЧЕРЕЗ БОТА (РЕКОМЕНДУЕТСЯ) ---
+# Требует токен бота и включенный "Message Content Intent"
+ENABLE_DISCORD_BOT_LOG=False
+DISCORD_BOT_TOKEN=
+# ID Веток (Threads). Оставьте 0, если не используете ветки.
+DISCORD_LOG_THREAD_ID_MAIN=0
+DISCORD_LOG_THREAD_ID_TEST=0
+
+# --- ВАРИАНТ 2: ЧЕРЕЗ ВЕБХУК (LEGACY) ---
+# Устаревший метод. Просто ссылка на вебхук.
+DISCORD_WEBHOOK_URL=
+
+
+# ==========================================
+#       ВЕБ-ПАНЕЛЬ (DASHBOARD)
+# ==========================================
+ENABLE_WEB_DASHBOARD=False
+WEB_ADMIN_USER=admin
+WEB_ADMIN_PASS=admin
+WEB_SECRET_KEY=secret_key
 """
 
 if not os.path.exists(ENV_FILE):
     print(f"⚠️ Файл {ENV_FILE} не найден!")
-    print(f"⚙️ Создаю новый файл {ENV_FILE} с шаблоном настроек...")
+    print(f"⚙️ Создаю чистый файл {ENV_FILE} с документацией...")
     try:
         with open(ENV_FILE, "w", encoding="utf-8") as f:
             f.write(ENV_TEMPLATE)
-        print(f"✅ Файл {ENV_FILE} успешно создан.")
-        print("❗️ ПОЖАЛУЙСТА, ОТКРОЙТЕ .env И ЗАПОЛНИТЕ BOT_TOKEN И ДРУГИЕ ДАННЫЕ.")
-        print("🛑 Бот остановлен.")
-        sys.exit(0) # Останавливаем бота, чтобы не сыпались ошибки
+        print(f"✅ Файл {ENV_FILE} создан.")
+        print("🛑 БОТ ОСТАНОВЛЕН. Заполните настройки в .env")
+        sys.exit(0)
     except Exception as e:
-        print(f"❌ Ошибка при создании .env: {e}")
+        print(f"❌ Ошибка создания .env: {e}")
         sys.exit(1)
 
+# === 2. ЗАГРУЗКА И ОБРАБОТКА ===
 load_dotenv()
-START_TIME = time.time()
-BOT_VERSION = "2.7"
 
-# --- ТОКЕНЫ ---
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-ADMIN_ID = os.getenv("ADMIN_ID")
-TEST_BOT_TOKEN = os.getenv("TEST_BOT_TOKEN")
-IS_TEST_ENV = (BOT_TOKEN == TEST_BOT_TOKEN) and (BOT_TOKEN is not None)
+def get_bool(key, default=False):
+    val = os.getenv(key, str(default)).lower()
+    return val in ["true", "1", "yes", "on"]
 
-# --- СЕРВЕР ---
-FORCE_CLOUD_FILE = ".force_cloud"
-IS_FORCED_CLOUD = os.path.exists(FORCE_CLOUD_FILE)
+def get_list(key):
+    val = os.getenv(key, "")
+    if not val or val == "0": return []
+    try:
+        return [int(x.strip()) for x in val.split(",") if x.strip().isdigit()]
+    except:
+        return []
 
-if IS_FORCED_CLOUD:
-    USE_LOCAL_SERVER = False
-    LOCAL_SERVER_URL = None
-    # Сообщение для админа, которое отправится после рестарта
-    STARTUP_ERROR_MESSAGE = "⚠️ <b>Аварийный режим!</b>\nЛокальный сервер упал во время работы. Бот переведен на Cloud API."
+# --- CORE SETTINGS ---
+IS_TEST_ENV = get_bool("IS_TEST_ENV", False)
+
+# Выбор токена
+if IS_TEST_ENV:
+    target = os.getenv("TEST_BOT_TOKEN")
+    BOT_TOKEN = target if target else os.getenv("BOT_TOKEN")
 else:
-    # 2. Иначе берем настройки из .env
-    USE_LOCAL_SERVER = os.getenv("USE_LOCAL_SERVER", "False").lower() == "true"
-    LOCAL_SERVER_URL = os.getenv("LOCAL_SERVER_URL", "http://localhost:8081")
-    STARTUP_ERROR_MESSAGE = None
+    BOT_TOKEN = os.getenv("BOT_TOKEN")
 
-# --- ЛИМИТЫ (НОВОЕ) ---
-# Глобальный лимит (для режима /limit on)
-GLOBAL_MAX_CONCURRENT = 3
-# Лимит на одного пользователя (всегда активен)
-USER_MAX_CONCURRENT = 3
-# --- ЛИМИТЫ ---
-MAX_FILE_SIZE = 2000 * 1024 * 1024 if USE_LOCAL_SERVER else 50 * 1024 * 1024
-MAX_CONCURRENT_DOWNLOADS = 3
-DISCORD_LOG_THREAD_ID_MAIN = 1449438689984909322
-DISCORD_LOG_THREAD_ID_TEST = 1449439061701038264
+if not BOT_TOKEN:
+    print("❌ ОШИБКА: Токен не найден в .env!")
+    sys.exit(1)
 
-# --- ПУТИ И API ---
-DOWNLOADS_DIR = "downloads"
-LASTFM_API_KEY = os.getenv("LASTFM_API_KEY")
-LASTFM_API_URL = "http://ws.audioscrobbler.com/2.0/"
+# Админы
+MAIN_ADMIN = os.getenv("ADMIN_ID")
+ADMIN_IDS = [int(MAIN_ADMIN)] if (MAIN_ADMIN and MAIN_ADMIN.isdigit()) else []
+# Тестеры (опционально можно добавить логику слияния списков, если нужно)
+
+# Тех чат
 TECH_CHAT_ID = os.getenv("TECH_CHAT_ID")
+LOG_CHANNEL_ID = int(TECH_CHAT_ID) if (TECH_CHAT_ID and TECH_CHAT_ID.lstrip("-").isdigit()) else None
 
-# --- БЕЗОПАСНОСТЬ ---
-env_testers = os.getenv("TESTERS_IDS", "")
-TESTERS_LIST = set(int(x) for x in env_testers.split(",")) if env_testers else set()
-if os.getenv("ADMIN_ID"): TESTERS_LIST.add(int(os.getenv("ADMIN_ID")))
+LASTFM_API_KEY = os.getenv("LASTFM_API_KEY")
 
-# --- WEB DASHBOARD (НОВОЕ) ---
-ENABLE_WEB_DASHBOARD = os.getenv("ENABLE_WEB_DASHBOARD", "False").lower() == "true"
-WEB_SERVER_HOST = "0.0.0.0"
-WEB_SERVER_PORT = 8082
+# --- TELEGRAM API (LOCAL SERVER / DOCKER) ---
+# Настройки для обхода лимита 50МБ
+USE_LOCAL_SERVER = get_bool("USE_LOCAL_SERVER", False)
+LOCAL_SERVER_URL = os.getenv("LOCAL_SERVER_URL", "http://127.0.0.1:8081")
+
+# --- TELEGRAM INPUT (WEBHOOK) ---
+# Настройки получения входящих сообщений
+USE_WEBHOOK = get_bool("USE_WEBHOOK", False)
+WEBHOOK_HOST = os.getenv("WEBHOOK_HOST", "0.0.0.0")
+WEBHOOK_PORT = int(os.getenv("WEBHOOK_PORT", 8080))
+WEBHOOK_PATH = os.getenv("WEBHOOK_PATH", "/webhook")
+
+# --- DISCORD LOGGING ---
+ENABLE_DISCORD_BOT_LOG = get_bool("ENABLE_DISCORD_BOT_LOG", False)
+DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN")
+DISCORD_LOG_THREAD_ID_MAIN = int(os.getenv("DISCORD_LOG_THREAD_ID_MAIN", 0))
+DISCORD_LOG_THREAD_ID_TEST = int(os.getenv("DISCORD_LOG_THREAD_ID_TEST", 0))
+
+# Legacy
+ENABLE_DISCORD_WEBHOOK_LOG = False
+DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL", "")
+
+# --- WEB DASHBOARD ---
+ENABLE_WEB_DASHBOARD = get_bool("ENABLE_WEB_DASHBOARD", False)
 WEB_ADMIN_USER = os.getenv("WEB_ADMIN_USER", "admin")
 WEB_ADMIN_PASS = os.getenv("WEB_ADMIN_PASS", "admin")
-WEB_SECRET_KEY = os.getenv("WEB_SECRET_KEY", "super_secret_cookie_key_123")
-DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1443448403026514032/ypNP-_dP3XqWeBIUKwFibShsurjn5oqxYP_VxWkSmtUCPaL99uY5bfPUe3JmdUX4tQb4"
-DISCORD_WEBHOOK_URL_TEST = "https://discord.com/api/webhooks/1443448403026514032/ypNP-_dP3XqWeBIUKwFibShsurjn5oqxYP_VxWkSmtUCPaL99uY5bfPUe3JmdUX4tQb4"
-USE_WEBHOOK = False
-DISCORD_LOG_THREAD_ID_MAIN = 1449438689984909322
-DISCORD_LOG_THREAD_ID_TEST = 1449439061701038264
-SAFE_CHARS = r'[a-zA-Z0-9\-\_\.\/\?\=\&\%\+\~]+'
+WEB_SECRET_KEY = os.getenv("WEB_SECRET_KEY", "secret")
+
+# --- CONSTANTS ---
+MAX_FILE_SIZE = 2000 * 1024 * 1024 if USE_LOCAL_SERVER else 50 * 1024 * 1024
 
 URL_PATTERNS = [
     r'^https?://(www\.|m\.)?vk\.(com|ru)/video.*',
@@ -137,35 +185,3 @@ URL_PATTERNS = [
     r'^https?://music\.yandex\.[a-z]{2,3}/.*',
     r'^https?://(geo\.)?music\.apple\.com/.*',
 ]
-
-# --- СПИСОК КОМАНД ---
-BOT_COMMANDS_LIST = [
-    # Пользователь
-    ("start", "cmd_start", "user", False),
-    ("login", "cmd_login", "user", True),
-    ("language", "cmd_language", "user", False),
-    
-    # Админ - Модерация
-    ("users", "cmd_users", "admin_mod", False),
-    ("ban", "cmd_ban", "admin_mod", True),
-    ("unban", "cmd_unban", "admin_mod", True),
-    ("answer", "cmd_answer", "admin_mod", True),
-    ("check", "cmd_check", "admin_tech", False),
-    ("update", "cmd_update", "admin_tech", False),
-    ("clearcache", "cmd_clearcache", "admin_tech", False),
-]
-
-# --- МОДУЛИ (Вкл/Выкл) ---
-# Добавлен TextFind
-MODULES_LIST = [
-    "YouTube", "YouTubeMusic", "Instagram", 
-    "TikTokVideos", "TikTokPhotos", "TelegramVideo", 
-    "Twitch", "VK", "SoundCloud", "Spotify",
-    "InlineVideo", "InlineAudio", "TextFind",
-    "YandexMusic", "AppleMusic"
-]
-
-# Имя бота (заполнится автоматически)
-BOT_USERNAME = None
-
-DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN", "")
