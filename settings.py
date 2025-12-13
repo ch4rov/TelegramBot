@@ -2,7 +2,7 @@ import os
 import sys
 from dotenv import load_dotenv
 
-# === 1. ГЕНЕРАЦИЯ ШАБЛОНА .ENV ===
+# === 1. КОНФИГУРАЦИЯ И ШАБЛОН ===
 ENV_FILE = ".env"
 
 ENV_TEMPLATE = """# ==========================================
@@ -23,37 +23,30 @@ TEST_BOT_TOKEN=
 # 3. Доступ
 # Ваш ID (Главный админ)
 ADMIN_ID=
-# ID Технического канала (Logs)
+
+# 4. Технический чат (Storage)
+# Чат для хранения файлов, плейсхолдеров и кэширования file_id.
+# Бот должен быть администратором.
 TECH_CHAT_ID=
 
-# 4. API Ключи
+# 5. API Ключи
 LASTFM_API_KEY=
 
 
 # ==========================================
 #  TELEGRAM API: LOCAL SERVER (DOCKER)
 # ==========================================
-# Public Cloud API имеет лимит на отправку файлов 50 МБ.
-# Local Bot API Server (telegram-bot-api в Docker) позволяет слать до 2000 МБ.
-# Включайте только если у вас запущен этот контейнер.
-
 # Использовать локальный сервер API? (True/False)
 USE_LOCAL_SERVER=False
 
 # Адрес вашего Docker-контейнера с API (обычно порт 8081)
-# Пример: http://127.0.0.1:8081
 LOCAL_SERVER_URL=http://127.0.0.1:8081
 
 
 # ==========================================
 #  TELEGRAM INPUT: WEBHOOK VS POLLING
 # ==========================================
-# Polling (False): Бот сам опрашивает сервера Telegram. (Удобно для разработки)
-# Webhook (True):  Telegram шлет запросы боту. (Нужен "белый" IP/SSL, для VDS)
-
 USE_WEBHOOK=False
-
-# Настройки для поднятия aiohttp сервера (только если USE_WEBHOOK=True)
 WEBHOOK_HOST=0.0.0.0
 WEBHOOK_PORT=8080
 WEBHOOK_PATH=/webhook
@@ -62,17 +55,12 @@ WEBHOOK_PATH=/webhook
 # ==========================================
 #       ЛОГИРОВАНИЕ (DISCORD)
 # ==========================================
-
-# --- ВАРИАНТ 1: ЧЕРЕЗ БОТА (РЕКОМЕНДУЕТСЯ) ---
-# Требует токен бота и включенный "Message Content Intent"
 ENABLE_DISCORD_BOT_LOG=False
 DISCORD_BOT_TOKEN=
-# ID Веток (Threads). Оставьте 0, если не используете ветки.
 DISCORD_LOG_THREAD_ID_MAIN=0
 DISCORD_LOG_THREAD_ID_TEST=0
 
-# --- ВАРИАНТ 2: ЧЕРЕЗ ВЕБХУК (LEGACY) ---
-# Устаревший метод. Просто ссылка на вебхук.
+# Legacy
 DISCORD_WEBHOOK_URL=
 
 
@@ -85,103 +73,143 @@ WEB_ADMIN_PASS=admin
 WEB_SECRET_KEY=secret_key
 """
 
-if not os.path.exists(ENV_FILE):
-    print(f"⚠️ Файл {ENV_FILE} не найден!")
-    print(f"⚙️ Создаю чистый файл {ENV_FILE} с документацией...")
-    try:
-        with open(ENV_FILE, "w", encoding="utf-8") as f:
-            f.write(ENV_TEMPLATE)
-        print(f"✅ Файл {ENV_FILE} создан.")
-        print("🛑 БОТ ОСТАНОВЛЕН. Заполните настройки в .env")
-        sys.exit(0)
-    except Exception as e:
-        print(f"❌ Ошибка создания .env: {e}")
-        sys.exit(1)
+# === 2. ФУНКЦИИ-ПОМОЩНИКИ ===
 
-# === 2. ЗАГРУЗКА И ОБРАБОТКА ===
+def save_key_to_env(key, value):
+    """Безопасно сохраняет переменную в .env файл"""
+    try:
+        # Читаем все строки
+        with open(ENV_FILE, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+        
+        new_lines = []
+        key_found = False
+        
+        for line in lines:
+            # Если нашли строку с нашим ключом, заменяем её
+            if line.strip().startswith(f"{key}="):
+                new_lines.append(f"{key}={value}\n")
+                key_found = True
+            else:
+                new_lines.append(line)
+        
+        # Если ключа не было в файле, добавляем в конец
+        if not key_found:
+            new_lines.append(f"\n{key}={value}\n")
+            
+        with open(ENV_FILE, "w", encoding="utf-8") as f:
+            f.writelines(new_lines)
+            
+    except Exception as e:
+        print(f"❌ Не удалось записать в .env: {e}")
+
+def ask_user(prompt_text):
+    """Запрашивает ввод у пользователя в консоли"""
+    while True:
+        val = input(f"✍️  {prompt_text}: ").strip()
+        if val:
+            return val
+        print("⚠️ Значение не может быть пустым.")
+
+# === 3. ИНИЦИАЛИЗАЦИЯ ФАЙЛА ===
+if not os.path.exists(ENV_FILE):
+    print(f"⚙️ Файл {ENV_FILE} не найден. Создаю шаблон...")
+    with open(ENV_FILE, "w", encoding="utf-8") as f:
+        f.write(ENV_TEMPLATE)
+    print(f"✅ Файл {ENV_FILE} создан.")
+
+# Загружаем то, что есть
 load_dotenv()
+
+# === 4. ПРОВЕРКА И ИНТЕРАКТИВНЫЙ ВВОД ===
+
+# --- РЕЖИМ ---
+IS_TEST_ENV_STR = os.getenv("IS_TEST_ENV", "False").lower()
+IS_TEST_ENV = IS_TEST_ENV_STR in ["true", "1", "yes", "on"]
+
+# --- ТОКЕН БОТА ---
+# Определяем, какой ключ нам нужен
+TARGET_TOKEN_KEY = "TEST_BOT_TOKEN" if IS_TEST_ENV else "BOT_TOKEN"
+BOT_TOKEN = os.getenv(TARGET_TOKEN_KEY)
+
+if not BOT_TOKEN:
+    print(f"\n❌ {TARGET_TOKEN_KEY} не найден в настройках.")
+    print("💡 Вставьте токен бота (от @BotFather).")
+    
+    # Спрашиваем токен
+    BOT_TOKEN = ask_user("Вставьте токен и нажмите Enter")
+    
+    # Сохраняем в файл и обновляем переменную окружения
+    save_key_to_env(TARGET_TOKEN_KEY, BOT_TOKEN)
+    os.environ[TARGET_TOKEN_KEY] = BOT_TOKEN
+    print("✅ Токен сохранен!\n")
+
+# --- ID АДМИНА ---
+ADMIN_ID_RAW = os.getenv("ADMIN_ID", "")
+clean_admin = ADMIN_ID_RAW.replace('"', '').replace("'", "").strip()
+
+if not clean_admin:
+    print("❌ ADMIN_ID не найден.")
+    print("💡 Введите ваш Telegram ID (число). Бот выдаст вам права администратора.")
+    
+    user_input_id = ask_user("Введите ваш ID")
+    
+    # Простая проверка на число
+    if not user_input_id.isdigit():
+        print("⚠️ Это не похоже на ID, но я сохраню.")
+    
+    save_key_to_env("ADMIN_ID", user_input_id)
+    clean_admin = user_input_id
+    print("✅ ID Админа сохранен!\n")
+
+# Парсинг админов
+ADMIN_IDS = []
+if clean_admin:
+    parts = [x.strip() for x in clean_admin.split(",") if x.strip().isdigit()]
+    ADMIN_IDS = [int(x) for x in parts]
+
+print(f"👑 ADMIN_IDS загружены: {ADMIN_IDS}")
+
+# === 5. ОСТАЛЬНЫЕ НАСТРОЙКИ (ТИХИЕ) ===
 
 def get_bool(key, default=False):
     val = os.getenv(key, str(default)).lower()
     return val in ["true", "1", "yes", "on"]
 
-def get_list(key):
-    val = os.getenv(key, "")
-    if not val or val == "0": return []
-    try:
-        return [int(x.strip()) for x in val.split(",") if x.strip().isdigit()]
-    except:
-        return []
-
-# --- CORE SETTINGS ---
-IS_TEST_ENV = get_bool("IS_TEST_ENV", False)
-
-# Выбор токена
-if IS_TEST_ENV:
-    target = os.getenv("TEST_BOT_TOKEN")
-    BOT_TOKEN = target if target else os.getenv("BOT_TOKEN")
-else:
-    BOT_TOKEN = os.getenv("BOT_TOKEN")
-
-if not BOT_TOKEN:
-    print("❌ ОШИБКА: Токен не найден в .env!")
-    sys.exit(1)
-
-# --- АДМИНЫ (ИСПРАВЛЕНО) ---
-raw_admin = os.getenv("ADMIN_ID", "")
-
-# 1. Защита от пробелов и кавычек
-clean_admin = raw_admin.replace('"', '').replace("'", "").strip()
-
-ADMIN_IDS = []
-
-# 2. Умный парсинг (поддерживает и один ID, и список через запятую)
-if clean_admin:
-    # Разбиваем по запятой, удаляем пробелы у каждого элемента, фильтруем только цифры
-    parts = [x.strip() for x in clean_admin.split(",") if x.strip().isdigit()]
-    ADMIN_IDS = [int(x) for x in parts]
-
-# 3. Вывод отладки (Смотри в консоль при запуске!)
-print(f"👑 ADMIN_IDS загружены: {ADMIN_IDS}")
-
-if not ADMIN_IDS:
-    print("⚠️ ПРЕДУПРЕЖДЕНИЕ: ADMIN_ID в .env пуст или некорректен!")
-
-# Тех чат
+# Tech Chat / Storage
 TECH_CHAT_ID = os.getenv("TECH_CHAT_ID")
-LOG_CHANNEL_ID = int(TECH_CHAT_ID) if (TECH_CHAT_ID and TECH_CHAT_ID.lstrip("-").isdigit()) else None
+# Если нужно включить логи в канал, раскомментируйте следующую строку:
+# LOG_CHANNEL_ID = int(TECH_CHAT_ID) if (TECH_CHAT_ID and TECH_CHAT_ID.lstrip("-").isdigit()) else None
+LOG_CHANNEL_ID = None 
 
 LASTFM_API_KEY = os.getenv("LASTFM_API_KEY")
 
-# --- TELEGRAM API (LOCAL SERVER / DOCKER) ---
-# Настройки для обхода лимита 50МБ
+# Local Server
 USE_LOCAL_SERVER = get_bool("USE_LOCAL_SERVER", False)
 LOCAL_SERVER_URL = os.getenv("LOCAL_SERVER_URL", "http://127.0.0.1:8081")
 
-# --- TELEGRAM INPUT (WEBHOOK) ---
-# Настройки получения входящих сообщений
+# Webhook
 USE_WEBHOOK = get_bool("USE_WEBHOOK", False)
 WEBHOOK_HOST = os.getenv("WEBHOOK_HOST", "0.0.0.0")
 WEBHOOK_PORT = int(os.getenv("WEBHOOK_PORT", 8080))
 WEBHOOK_PATH = os.getenv("WEBHOOK_PATH", "/webhook")
 
-# --- DISCORD LOGGING ---
+# Discord
 ENABLE_DISCORD_BOT_LOG = get_bool("ENABLE_DISCORD_BOT_LOG", False)
 DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN")
 DISCORD_LOG_THREAD_ID_MAIN = int(os.getenv("DISCORD_LOG_THREAD_ID_MAIN", 0))
 DISCORD_LOG_THREAD_ID_TEST = int(os.getenv("DISCORD_LOG_THREAD_ID_TEST", 0))
 
-# Legacy
 ENABLE_DISCORD_WEBHOOK_LOG = False
 DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL", "")
 
-# --- WEB DASHBOARD ---
+# Dashboard
 ENABLE_WEB_DASHBOARD = get_bool("ENABLE_WEB_DASHBOARD", False)
 WEB_ADMIN_USER = os.getenv("WEB_ADMIN_USER", "admin")
 WEB_ADMIN_PASS = os.getenv("WEB_ADMIN_PASS", "admin")
 WEB_SECRET_KEY = os.getenv("WEB_SECRET_KEY", "secret")
 
-# --- CONSTANTS ---
+# === 6. КОНСТАНТЫ ===
 MAX_FILE_SIZE = 2000 * 1024 * 1024 if USE_LOCAL_SERVER else 50 * 1024 * 1024
 
 URL_PATTERNS = [
@@ -200,10 +228,6 @@ URL_PATTERNS = [
     r'^https?://music\.yandex\.[a-z]{2,3}/.*',
     r'^https?://(geo\.)?music\.apple\.com/.*',
 ]
-
-# ==========================================
-#          ИНТЕРФЕЙС БОТА
-# ==========================================
 
 BOT_COMMANDS_LIST = [
     # Пользователь
