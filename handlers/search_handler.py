@@ -278,6 +278,103 @@ async def delete_msg(cb: types.CallbackQuery):
     except: pass
 
 
+@router.callback_query(F.data.startswith("music:YT:"))
+async def handle_music_selection(cb: types.CallbackQuery, user_lang: str = "en"):
+    video_id = cb.data.split(":", 2)[2]
+    src_url = f"https://youtu.be/{video_id}"
+
+    status = None
+    pulsar = None
+    try:
+        status = await cb.message.answer("⏳")
+    except Exception:
+        pass
+
+    try:
+        pulsar = _ActionPulsar(cb.bot, cb.message.chat.id, ACTION_UPLOAD_AUDIO)
+        pulsar.start()
+    except Exception:
+        pulsar = None
+
+    custom_opts = {
+        "format": "bestaudio/best",
+        "noplaylist": True,
+        "writethumbnail": True,
+        "postprocessors": [
+            {
+                "key": "FFmpegExtractAudio",
+                "preferredcodec": "mp3",
+                "preferredquality": "192",
+            }
+        ],
+    }
+
+    files, folder, error, meta = await download_content(src_url, custom_opts, user_id=cb.from_user.id)
+    if error:
+        if pulsar:
+            await pulsar.stop()
+        try:
+            if status:
+                await status.delete()
+        except Exception:
+            pass
+        try:
+            await cb.message.answer(f"❌ {html.escape(str(error))}", parse_mode="HTML")
+        except Exception:
+            pass
+        if folder:
+            shutil.rmtree(folder, ignore_errors=True)
+        return
+
+    try:
+        audio_exts = (".mp3", ".m4a", ".opus", ".ogg")
+        target = next((f for f in files if f.lower().endswith(audio_exts)), None)
+        if not target:
+            raise Exception("No audio found")
+
+        caption = make_caption(meta or {}, src_url, links_page=None)
+
+        thumb_path = next((f for f in files if f.lower().endswith((".jpg", ".jpeg", ".png", ".webp"))), None)
+        performer = (meta or {}).get("artist") or (meta or {}).get("uploader") or (meta or {}).get("channel") or None
+        title = (meta or {}).get("track") or (meta or {}).get("title") or None
+
+        if pulsar:
+            pulsar.set_action(ACTION_UPLOAD_AUDIO)
+
+        if thumb_path:
+            await cb.message.answer_audio(
+                FSInputFile(target),
+                caption=caption,
+                parse_mode="HTML",
+                performer=performer,
+                title=title,
+                thumbnail=FSInputFile(thumb_path),
+            )
+        else:
+            await cb.message.answer_audio(
+                FSInputFile(target),
+                caption=caption,
+                parse_mode="HTML",
+                performer=performer,
+                title=title,
+            )
+    except Exception as e:
+        try:
+            await cb.message.answer(f"⚠️ {html.escape(str(e))}", parse_mode="HTML")
+        except Exception:
+            pass
+    finally:
+        if pulsar:
+            await pulsar.stop()
+        try:
+            if status:
+                await status.delete()
+        except Exception:
+            pass
+        if folder and os.path.exists(folder):
+            shutil.rmtree(folder, ignore_errors=True)
+
+
 @router.callback_query(F.data.startswith("ytm_clip:"))
 async def cb_download_ytm_clip(cb: types.CallbackQuery, user_lang: str = "en"):
     url = cb.data.split(":", 1)[1]
@@ -382,10 +479,9 @@ async def cb_download_ytm_clip(cb: types.CallbackQuery, user_lang: str = "en"):
             shutil.rmtree(folder, ignore_errors=True)
 
 # --- ОБРАБОТКА ССЫЛОК В ЧАТЕ ---
-@router.message(F.text)
+@router.message(F.text, ~F.text.startswith("/"))
 async def message_handler(message: types.Message, user_lang: str = "en"):
     text = message.text.strip()
-    if text.startswith("/"): return
     
     if is_valid_url(text):
         status = await message.answer("⏳")

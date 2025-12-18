@@ -73,4 +73,6 @@ BOT_COMMANDS_LIST = [
     ("status", "System Status", "Статус системы", "admin", True),
     ("clearcache", "Clear Cache", "Очистить кэш", "admin", True),
     ("modules", "Manage Modules", "Управление модулями", "admin", True),
+    ("edituser", "Edit user/group", "Редактировать пользователя/группу", "admin", True),
+    ("update", "Update bot commands", "Обновить команды", "admin", True),
 ]

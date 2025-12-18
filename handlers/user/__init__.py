@@ -1,11 +1,12 @@
-from aiogram import Router
-from . import main_start, cookies, video_notes, commands
+from .router import user_router
+from . import main_start, cookies, video_notes, links, text_search
 
-# Create main router for all user commands
-user_router = Router()
+# Import modules that register handlers directly on user_router
+from . import commands  # noqa: F401
 
-# Include all sub-routers
+# Include sub-routers (separate Router instances)
 user_router.include_router(main_start.router)
-user_router.include_router(commands.user_router)
 user_router.include_router(cookies.router)
 user_router.include_router(video_notes.router)
+user_router.include_router(links.links_router)
+user_router.include_router(text_search.router)

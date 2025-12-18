@@ -50,6 +50,148 @@ async def _pulse_action(message: types.Message, get_action, stop: asyncio.Event,
         except asyncio.TimeoutError:
             continue
 
+
+async def _get_video_duration(ffprobe_path: str, video_path: str) -> float | None:
+    """Get video duration in seconds using ffprobe."""
+    args = [
+        ffprobe_path,
+        "-v", "error",
+        "-select_streams", "v:0",
+        "-show_entries", "format=duration",
+        "-of", "default=noprint_wrappers=1:nokey=1:nokey=1",
+        video_path,
+    ]
+    try:
+        completed = await asyncio.to_thread(
+            subprocess.run,
+            args,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+        if completed.returncode == 0:
+            duration_str = (completed.stdout or b"").decode("utf-8", errors="ignore").strip()
+            return float(duration_str)
+    except Exception:
+        pass
+    return None
+
+
+async def _optimize_video_size(
+    ffmpeg_path: str,
+    input_path: str,
+    output_path: str,
+    max_size_mb: float = 49.0,
+    vf: str = "crop=min(iw\\,ih):min(iw\\,ih),scale=640:640",
+) -> bool:
+    """
+    Encode video and if it exceeds max_size_mb, re-encode with lower bitrate.
+    Returns True on success, False on failure.
+    """
+    max_size_bytes = max_size_mb * 1024 * 1024
+    
+    # First pass: encode with default settings
+    args = [
+        ffmpeg_path,
+        "-y",
+        "-hide_banner",
+        "-loglevel", "error",
+        "-i", input_path,
+        "-vf", vf,
+        "-c:v", "libx264",
+        "-preset", "fast",
+        "-crf", "26",
+        "-c:a", "aac",
+        "-b:a", "64k",
+        "-f", "mp4",
+        output_path,
+    ]
+    
+    completed = await asyncio.to_thread(
+        subprocess.run,
+        args,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    
+    if completed.returncode != 0:
+        err = (completed.stderr or b"").decode("utf-8", errors="ignore").strip()
+        logger.error(f"FFmpeg encoding failed: {err}")
+        return False
+    
+    if not os.path.exists(output_path):
+        logger.error(f"Output file not created: {output_path}")
+        return False
+    
+    file_size = os.path.getsize(output_path)
+    
+    # If file is within limit, we're done
+    if file_size <= max_size_bytes:
+        logger.info(f"Video size {file_size / 1024 / 1024:.1f} MB is within limit")
+        return True
+    
+    logger.info(f"Video size {file_size / 1024 / 1024:.1f} MB exceeds limit; re-encoding with lower bitrate...")
+    
+    # Get video duration to calculate target bitrate
+    base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+    installs_dir = os.path.join(base_dir, "core", "installs")
+    ffprobe_path = os.path.join(installs_dir, "ffprobe.exe")
+    if not os.path.exists(ffprobe_path):
+        ffprobe_path = "ffprobe"
+    
+    duration = await _get_video_duration(ffprobe_path, input_path)
+    if not duration or duration <= 0:
+        logger.warning("Could not determine video duration; using file size heuristic")
+        # Fallback: reduce CRF by 3-4 points (lower quality)
+        target_crf = 30
+    else:
+        # Calculate target bitrate: reserve 64k for audio + 50k margin
+        audio_bitrate = 64
+        margin = 50
+        available_bitrate = (max_size_bytes * 8 / 1000) / duration - audio_bitrate - margin
+        available_bitrate = max(500, available_bitrate)  # At least 500 kbps
+        
+        logger.info(f"Video duration: {duration:.1f}s, target bitrate: {available_bitrate:.0f} kbps")
+        
+        # Use -b:v for constant bitrate instead of CRF
+        args = [
+            ffmpeg_path,
+            "-y",
+            "-hide_banner",
+            "-loglevel", "error",
+            "-i", input_path,
+            "-vf", vf,
+            "-c:v", "libx264",
+            "-preset", "fast",
+            "-b:v", f"{available_bitrate:.0f}k",
+            "-maxrate", f"{available_bitrate * 1.2:.0f}k",
+            "-bufsize", f"{available_bitrate * 2:.0f}k",
+            "-c:a", "aac",
+            "-b:a", "64k",
+            "-f", "mp4",
+            output_path,
+        ]
+        
+        completed = await asyncio.to_thread(
+            subprocess.run,
+            args,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+        
+        if completed.returncode != 0:
+            err = (completed.stderr or b"").decode("utf-8", errors="ignore").strip()
+            logger.error(f"FFmpeg re-encoding failed: {err}")
+            return False
+        
+        new_size = os.path.getsize(output_path)
+        logger.info(f"Re-encoded video size: {new_size / 1024 / 1024:.1f} MB")
+        return True
+    
+    return False
+
 class VideoNoteState(StatesGroup):
     recording = State()
 
@@ -153,41 +295,17 @@ async def process_video(message: types.Message, user_lang: str = "en"):
             ffmpeg_path = "ffmpeg"
 
         vf = "crop=min(iw\\,ih):min(iw\\,ih),scale=640:640"
-        args = [
-            ffmpeg_path,
-            "-y",
-            "-hide_banner",
-            "-loglevel",
-            "error",
-            "-i",
-            input_path,
-            "-vf",
-            vf,
-            "-c:v",
-            "libx264",
-            "-preset",
-            "fast",
-            "-crf",
-            "26",
-            "-c:a",
-            "aac",
-            "-b:a",
-            "64k",
-            "-f",
-            "mp4",
-            output_path,
-        ]
-
-        completed = await asyncio.to_thread(
-            subprocess.run,
-            args,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,
-            check=False,
+        
+        # Optimize video size: encode and re-encode if needed to fit in 49 MB
+        ok = await _optimize_video_size(
+            ffmpeg_path=ffmpeg_path,
+            input_path=input_path,
+            output_path=output_path,
+            max_size_mb=49.0,
+            vf=vf,
         )
-        if completed.returncode != 0:
-            err = (completed.stderr or b"").decode("utf-8", errors="ignore").strip()
-            raise Exception(err or f"ffmpeg failed with code {completed.returncode}")
+        if not ok:
+            raise Exception("Failed to encode video")
         
         if os.path.exists(output_path):
             # Stage: uploading video note to Telegram

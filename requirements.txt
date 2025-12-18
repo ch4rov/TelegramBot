@@ -4,3 +4,5 @@ aiosqlite
 asyncpg
 python-dotenv
 yt-dlp
+cachetools
+youtube-search-python

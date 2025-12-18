@@ -394,14 +394,10 @@ async def handle_link(message: types.Message):
         if action_task: action_task.cancel()
         if folder_path and os.path.exists(folder_path): shutil.rmtree(folder_path, ignore_errors=True)
 
-@user_router.message(F.text & ~F.text.contains("http"))
+@user_router.message(F.text & ~F.text.contains("http") & ~F.text.startswith("/"))
 async def handle_plain_text(message: types.Message):
-    if message.text.startswith('/'): return
     if message.chat.type != "private": return
     user = message.from_user
-    if not await get_module_status("TextFind"):
-        await safe_api_call(message.answer, await t(user.id, 'module_disabled'))
-        return
     await safe_api_call(message.bot.send_chat_action, chat_id=message.chat.id, action=ChatAction.TYPING)
     results = await search_youtube(message.text.strip(), limit=5)
     if not results:
@@ -411,5 +407,4 @@ async def handle_plain_text(message: types.Message):
     for res in results:
         title = res.get('title', 'Track')
         buttons.append([InlineKeyboardButton(text=f"{title} ({res['duration']})", callback_data=f"music:YT:{res['id']}")])
-    buttons.append([InlineKeyboardButton(text="❌ Close", callback_data="delete_msg")])
     await safe_api_call(message.answer, f"🔍 Results for: {message.text}", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))

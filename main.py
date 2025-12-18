@@ -19,6 +19,8 @@ from services.placeholder_service import ensure_placeholders
 from middlewares.logger import LoggingMiddleware
 from middlewares.language import LanguageMiddleware
 from middlewares.antiflood import ThrottlingMiddleware
+from middlewares.registration import RegistrationMiddleware
+from middlewares.test_mode_guard import TestModeGuardMiddleware
 
 # === ИМПОРТЫ РОУТЕРОВ ===
 # 1. Админка
@@ -57,6 +59,12 @@ async def main():
         logger.error(f"Error updating bot commands: {e}")
 
     # Регистрация Middleware (порядок важен!)
+    # 0) Block random users in test mode
+    dp.update.middleware(TestModeGuardMiddleware())
+
+    # 1) Ensure user/group exists in DB for any update
+    dp.update.middleware(RegistrationMiddleware())
+
     dp.message.middleware(LoggingMiddleware())
     dp.callback_query.middleware(LoggingMiddleware())
     dp.message.middleware(LanguageMiddleware())

@@ -5,12 +5,56 @@ import logging
 from pathlib import Path
 from dotenv import load_dotenv
 
+# Not a secret; used only for redirect message in test mode
+DEFAULT_PROD_BOT_USERNAME = "ch4rov_bot"
+
 # 1. Paths
 BASE_DIR = Path(__file__).resolve().parent.parent
 ENV_PATH = BASE_DIR / ".env"
 
 if not ENV_PATH.exists():
-    print("[ERROR] .env file not found: " + str(ENV_PATH))
+    template = """# TelegramBot environment
+# Fill in at least one token (TEST_BOT_TOKEN or BOT_TOKEN) before запуск.
+
+# Use test token if enabled
+IS_TEST_ENV=True
+
+# Tokens (put your bot token here)
+TEST_BOT_TOKEN=
+BOT_TOKEN=
+
+# Admins (comma-separated)
+ADMIN_IDS=
+
+# Backward-compat (some parts of the project may still read ADMIN_ID)
+ADMIN_ID=
+
+# Local server mode
+USE_LOCAL_SERVER=False
+LOCAL_SERVER_URL=http://127.0.0.1:8081
+
+# Database
+# DB_TYPE=sqlite|postgres
+DB_TYPE=sqlite
+DB_PATH=bot.db
+DB_USER=
+DB_PASSWORD=
+DB_HOST=localhost
+DB_PORT=5432
+DB_NAME=telegram_bot
+
+# Optional
+TECH_CHAT_ID=
+LASTFM_API_KEY=
+LASTFM_SECRET=
+"""
+    try:
+        ENV_PATH.write_text(template, encoding="utf-8")
+        print("[CONFIG] Created missing .env template: " + str(ENV_PATH))
+        print("[CONFIG] Please set TEST_BOT_TOKEN or BOT_TOKEN and restart.")
+    except Exception as e:
+        print("[ERROR] .env file not found and could not be created: " + str(ENV_PATH))
+        print("[ERROR] " + str(e))
     sys.exit(1)
 
 load_dotenv(dotenv_path=ENV_PATH)
@@ -49,8 +93,12 @@ class Settings:
             self.ADMIN_IDS = [int(x) for x in admin_ids_str.replace(" ", "").split(",") if x]
         except ValueError:
             self.ADMIN_IDS = []
+
+        # Optional: production bot username for redirect in test mode
+        self.PROD_BOT_USERNAME = os.getenv("PROD_BOT_USERNAME", "").strip() or DEFAULT_PROD_BOT_USERNAME
         
         self.USE_LOCAL_SERVER = os.getenv("USE_LOCAL_SERVER", "False").lower() in ("true", "1", "yes")
+        self.LOCAL_SERVER_URL = os.getenv("LOCAL_SERVER_URL", "http://127.0.0.1:8081").strip()
         self.DROP_PENDING_UPDATES = True
         
         # 6. Database

@@ -1,4 +1,5 @@
 from sqlalchemy import select, update, func
+from sqlalchemy import delete
 from sqlalchemy.dialects.sqlite import insert
 from datetime import datetime, timedelta
 from services.database.core import session_maker 
@@ -62,6 +63,61 @@ async def get_user(user_id: int) -> User | None:
     async with session_maker() as session:
         result = await session.execute(select(User).where(User.id == user_id))
         return result.scalar_one_or_none()
+
+
+async def ensure_user_exists(
+    user_id: int,
+    username: str | None,
+    full_name: str,
+    tag: str | None = None,
+    language: str = "en",
+) -> User:
+    """Create user/group record if missing. Does NOT increment request_count for existing users."""
+    async with session_maker() as session:
+        async with session.begin():
+            existing = await session.execute(select(User).where(User.id == user_id))
+            user = existing.scalar_one_or_none()
+            if user:
+                # Keep DB in sync with latest visible fields without counting as interaction
+                update_data = {
+                    "full_name": full_name,
+                    "last_seen": datetime.now(),
+                    "is_active": True,
+                }
+                if tag:
+                    update_data["user_tag"] = tag
+                if username:
+                    update_data["username"] = username
+                    update_data["username_updated_at"] = datetime.now()
+
+                stmt = update(User).where(User.id == user_id).values(**update_data)
+                await session.execute(stmt)
+            else:
+                session.add(
+                    User(
+                        id=user_id,
+                        username=username,
+                        full_name=full_name,
+                        user_tag=tag or "",
+                        language=language or "en",
+                        is_active=True,
+                    )
+                )
+
+            result = await session.execute(select(User).where(User.id == user_id))
+            return result.scalar_one()
+
+
+async def delete_user(user_id: int) -> bool:
+    """Delete user/group row from DB. Returns True if something was deleted."""
+    async with session_maker() as session:
+        async with session.begin():
+            res = await session.execute(delete(User).where(User.id == user_id))
+            try:
+                return res.rowcount > 0
+            except Exception:
+                # Some drivers may not provide rowcount reliably
+                return True
 
 async def get_all_users():
     """Получает всех пользователей."""
