@@ -1,113 +1,152 @@
+# -*- coding: utf-8 -*-
+import os
+import shutil
+import uuid
+import logging
 import re
-import settings
-from services.database_service import get_module_status
-from core.logger_system import send_log
+import asyncio
+import yt_dlp
+from services.database.repo import get_user_cookie, get_global_cookie
+from core.config import config
+from services.odesli_service import get_links_by_url
 
-# Импорты стратегий
-from .VKDownloader.vk_strategy import VKStrategy
-from .YTDownloader.youtube_strategy import YouTubeVideoStrategy
-from .YTDownloader.youtube_music_strategy import YouTubeMusicStrategy
-from .TikTokDownloader.tiktok_strategy import TikTokStrategy
-from .TikTokDownloader.tiktok_photo_strategy import TikTokPhotoStrategy
-from .InstagramDownloader.instagram_strategy import InstagramStrategy
-from .SoundCloudDownloader.soundcloud_strategy import SoundCloudStrategy
-from .TwitchDownloader.twitch_strategy import TwitchStrategy 
-from .SpotifyDownloader.spotify_strategy import SpotifyStrategy
-# --- НОВЫЕ ИМПОРТЫ ---
-from .YandexDownloader.yandex_strategy import YandexStrategy
-from .AppleDownloader.apple_strategy import AppleStrategy
-# ---------------------
-from .common_downloader import CommonDownloader
+logger = logging.getLogger(__name__)
 
-def is_valid_url(url: str) -> bool:
-    if re.search(r'[;$\`"\'\{\}\[\]\|\^]', url): return False
-    for pattern in settings.URL_PATTERNS:
-        if re.match(pattern, url): return True
+# URL patterns for different platforms
+URL_PATTERNS = {
+    'youtube': r'(youtube\.com|youtu\.be)',
+    'tiktok': r'tiktok\.com',
+    'instagram': r'instagram\.com',
+    'vk': r'vk\.com|vkontakte\.ru',
+    'twitch': r'(twitch\.tv|clips\.twitch\.tv)',
+    'soundcloud': r'soundcloud\.com',
+    'spotify': r'open\.spotify\.com',
+}
+
+def is_valid_url(text):
+    """Check if text is a valid platform URL"""
+    if not text:
+        return False
+    
+    for platform, pattern in URL_PATTERNS.items():
+        if re.search(pattern, text):
+            return True
     return False
 
-async def route_download(url: str, custom_opts: dict = None):
-    if not is_valid_url(url):
-        return None, None, "Ссылка не поддерживается или запрещена ⛔", None
+async def download_content(url, custom_opts=None, user_id=None):
+    """Download content from URL using yt-dlp"""
+    original_url = url
 
-    downloader: CommonDownloader = None
-    module_key = None 
+    # Spotify is not directly downloadable; fall back to a YouTube link via Odesli (song.link)
+    try:
+        if url and re.search(URL_PATTERNS.get('spotify', r'$^'), url):
+            links = await get_links_by_url(url)
+            yt_url = None
+            if links and links.get('links'):
+                yt_url = links['links'].get('YouTube')
+            if yt_url:
+                url = yt_url
+                logger.info(f"Spotify fallback via YouTube: {original_url} -> {url}")
+    except Exception as e:
+        logger.warning(f"Spotify fallback failed for {original_url}: {e}")
 
-    # --- VK ---
-    if "vk.com" in url or "vk.ru" in url or "vkvideo.ru" in url:
-        downloader = VKStrategy(url)
-        module_key = "VK"
-        
-    # --- YOUTUBE ---
-    elif "youtube.com" in url or "youtu.be" in url:
-        is_music_url = "music.youtube.com" in url
-        force_video = custom_opts.get('force_video') if custom_opts else False
-        force_audio = False
-        if custom_opts and 'postprocessors' in custom_opts:
-            for pp in custom_opts['postprocessors']:
-                if pp.get('key') == 'FFmpegExtractAudio': force_audio = True
+    folder_name = str(uuid.uuid4())
+    save_path = os.path.join("tempfiles", folder_name)
+    os.makedirs(save_path, exist_ok=True)
 
-        if (is_music_url and not force_video) or force_audio:
-            downloader = YouTubeMusicStrategy(url)
-            module_key = "YouTubeMusic"
-        else:
-            downloader = YouTubeVideoStrategy(url)
-            module_key = "YouTube"
-        
-    # --- TIKTOK ---
-    elif "tiktok.com" in url:
-        if "/photo/" in url:
-            downloader = TikTokPhotoStrategy(url)
-            module_key = "TikTokPhotos"
-        else:
-            downloader = TikTokStrategy(url)
-            module_key = "TikTokVideos"
-        
-    # --- INSTAGRAM ---
-    elif "instagram.com" in url:
-        downloader = InstagramStrategy(url)
-        module_key = "Instagram"
-        
-    # --- SOUNDCLOUD ---
-    elif "soundcloud.com" in url:
-        downloader = SoundCloudStrategy(url)
-        module_key = "SoundCloud"
-        
-    # --- TWITCH ---
-    elif "twitch.tv" in url:
-        downloader = TwitchStrategy(url)
-        module_key = "Twitch"
-
-    # --- SPOTIFY ---
-    elif "spotify.com" in url or "spotify.link" in url or "spotify.com" in url:
-        downloader = SpotifyStrategy(url)
-        module_key = "Spotify"
-
-    # --- YANDEX (НОВОЕ) ---
-    elif "music.yandex" in url:
-        downloader = YandexStrategy(url)
-        module_key = "YandexMusic"
-
-    # --- APPLE (НОВОЕ) ---
-    elif "music.apple.com" in url:
-        downloader = AppleStrategy(url)
-        module_key = "AppleMusic"
-
-    # --- ПРОВЕРКА СТАТУСА ---
-    if module_key:
-        is_enabled = await get_module_status(module_key)
-        if not is_enabled:
-            return None, None, msg.MSG_DISABLE_MODULE, None
-
-    # --- ЗАПУСК ---
-    if downloader:
-        if custom_opts:
-            downloader.configure(**custom_opts)
-        try:
-            return await downloader.download()
-        except Exception as e:
-            return None, None, str(e), None
+    cookie_path = None
     
-    else:
-        return None, None, "Сервис не найден.", None
+    # Try to get cookies from database
+    if user_id:
+        # Determine service from URL
+        service = "youtube"
+        if "tiktok" in url:
+            service = "tiktok"
+        elif "instagram" in url:
+            service = "youtube"  # Instagram uses similar cookies
+        elif "vk" in url:
+            service = "vk"
+        elif "twitch" in url:
+            service = "twitch"
+        elif "soundcloud" in url:
+            service = "soundcloud"
+        elif "spotify" in url:
+            service = "spotify"
+        
+        # Try user cookies first
+        cookie_data = await get_user_cookie(user_id, service)
+        
+        # If no user cookies, try global cookies
+        if not cookie_data:
+            cookie_data = await get_global_cookie(service)
+        
+        if cookie_data:
+            cookie_path = os.path.join(save_path, "cookies.txt")
+            with open(cookie_path, "w", encoding="utf-8") as f:
+                f.write(cookie_data)
 
-download_content = route_download
+    ydl_opts = {
+        'outtmpl': os.path.join(save_path, '%(title)s.%(ext)s'),
+        'quiet': True,
+        'no_warnings': True,
+        'writeinfojson': False,
+        'writethumbnail': False,
+        'restrictfilenames': True,
+    }
+
+    # Ensure yt-dlp can find ffmpeg/ffprobe (needed for merging formats)
+    try:
+        base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+        installs_dir = os.path.join(base_dir, "core", "installs")
+        local_ffmpeg = os.path.join(installs_dir, "ffmpeg.exe")
+        local_ffprobe = os.path.join(installs_dir, "ffprobe.exe")
+        if os.path.exists(local_ffmpeg) and os.path.exists(local_ffprobe):
+            ydl_opts['ffmpeg_location'] = installs_dir
+            ydl_opts['prefer_ffmpeg'] = True
+            os.environ["PATH"] = f"{installs_dir}{os.pathsep}" + os.environ.get("PATH", "")
+    except Exception:
+        pass
+
+    # Default safer format for YouTube: prefer a single-file mp4 when possible
+    if re.search(URL_PATTERNS['youtube'], url) and 'format' not in ydl_opts:
+        ydl_opts['format'] = 'best[ext=mp4]/best'
+
+    if cookie_path:
+        ydl_opts['cookiefile'] = cookie_path
+
+    if custom_opts:
+        ydl_opts.update(custom_opts)
+
+    meta = {}
+    error = None
+    files = []
+
+    # Retry with fallback formats for cases where merging is required
+    attempts = [
+        dict(ydl_opts),
+        {**ydl_opts, 'format': 'best[ext=mp4]/best'},
+        {**ydl_opts, 'format': 'best'},
+    ]
+
+    def _extract_sync(opts: dict):
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            return ydl.extract_info(url, download=True)
+
+    for idx, opts in enumerate(attempts, start=1):
+        try:
+            info = await asyncio.to_thread(_extract_sync, opts)
+            meta = info
+            logger.info(f"Successfully downloaded from: {url} (attempt {idx})")
+            error = None
+            break
+        except Exception as e:
+            error = str(e)
+            logger.error(f"Error downloading {url} (attempt {idx}): {error}")
+    
+    # Collect downloaded files
+    if os.path.exists(save_path):
+        for root, dirs, filenames in os.walk(save_path):
+            for f in filenames:
+                files.append(os.path.join(root, f))
+
+    return files, save_path, error, meta

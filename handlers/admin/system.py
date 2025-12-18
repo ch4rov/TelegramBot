@@ -1,137 +1,186 @@
+# -*- coding: utf-8 -*-
 import sys
-import asyncio
+import os
+import time
+import logging
+import re
+import datetime
 from aiogram import Router, types, F
-from aiogram.filters import Command
+from aiogram.filters import Command, CommandObject
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from handlers.admin.filters import AdminFilter
+from services.database.repo import get_all_users
 
-# Импортируем наши настройки и сервисы
-import settings
-# ИСПРАВЛЕННЫЕ ИМПОРТЫ (из core, а не services)
-from core.logger_system import send_log
-from core.queue_manager import queue_manager
-from services.database_service import clear_file_cache, set_system_value
-
+logger = logging.getLogger(__name__)
 router = Router()
+router.message.filter(AdminFilter())
 
-# Простая проверка админа внутри файла (так надежнее)
-def is_admin(user_id: int) -> bool:
-    return user_id in settings.ADMIN_IDS
+# Время запуска бота
+BOT_START_TIME = time.time()
+BOT_COMMAND_COUNT = 0
 
-# --- UPDATE (HARD RESET) ---
-@router.message(Command("update"))
-async def cmd_update(message: types.Message):
-    if not is_admin(message.from_user.id): return
-
-    msg = await message.answer("🔄 <b>Принудительное обновление (Hard Reset)...</b>", parse_mode="HTML")
-    
+@router.message(Command("status"))
+async def cmd_status(message: types.Message):
+    """Bot status and health check command"""
     try:
-        # 1. Скачиваем изменения (fetch)
-        proc_fetch = await asyncio.create_subprocess_shell(
-            "git fetch origin", 
-            stdout=asyncio.subprocess.PIPE, 
-            stderr=asyncio.subprocess.PIPE
-        )
-        await proc_fetch.communicate()
-
-        # 2. Жестко сбрасываем локальные файлы до состояния origin/main
-        # Это удалит локальные правки (кроме .env и того, что в .gitignore)
-        proc_reset = await asyncio.create_subprocess_shell(
-            "git reset --hard origin/main", 
-            stdout=asyncio.subprocess.PIPE, 
-            stderr=asyncio.subprocess.PIPE
-        )
-        stdout, stderr = await proc_reset.communicate()
+        global BOT_COMMAND_COUNT
         
-        if proc_reset.returncode != 0:
-            await msg.edit_text(f"❌ <b>Ошибка Git:</b>\n<pre>{stderr.decode()}</pre>", parse_mode="HTML")
-            return
-
-        # 3. Получаем инфо о последнем коммите для логов
-        proc_log = await asyncio.create_subprocess_shell(
-            "git log -1 --pretty=%B", 
-            stdout=asyncio.subprocess.PIPE
-        )
-        log_out, _ = await proc_log.communicate()
-        commit_msg = log_out.decode().strip()
+        users = await get_all_users()
+        count = len(users)
+        active = sum(1 for u in users if u.is_active)
+        banned = sum(1 for u in users if u.is_banned)
         
-        await msg.edit_text(f"✅ <b>Обновлено!</b>\n📝 <i>{commit_msg}</i>\n\n♻️ Перезапуск системы...", parse_mode="HTML")
+        # Calculate uptime
+        uptime_seconds = time.time() - BOT_START_TIME
+        uptime_hours = uptime_seconds / 3600
+        uptime_days = uptime_hours / 24
         
-        # Логируем действие
-        await send_log("ADMIN", f"Force Update executed: {commit_msg}", admin=message.from_user)
+        # Ping calculation
+        start_ping = time.time()
+        # Simulate a small operation
+        await get_all_users()
+        ping = (time.time() - start_ping) * 1000  # in milliseconds
         
-        # 4. Выход с кодом 65 (Команда для раннера перезапустить процесс)
-        sys.exit(65) 
-
-    except Exception as e:
-        await msg.edit_text(f"❌ <b>Critical Error:</b> {str(e)}", parse_mode="HTML")
-
-# --- CLEAR CACHE (SMART) ---
-@router.message(Command("clearcache"))
-async def cmd_clearcache(message: types.Message):
-    if not is_admin(message.from_user.id): return
-    
-    args = message.text.split()
-    minutes = 0
-    
-    # Парсинг аргументов (10m, 1h, 1d)
-    if len(args) > 1:
-        param = args[1].lower()
-        try:
-            if param.endswith('m'): minutes = int(param[:-1])
-            elif param.endswith('h'): minutes = int(param[:-1]) * 60
-            elif param.endswith('d'): minutes = int(param[:-1]) * 60 * 24
-            else: minutes = int(param) # Если просто число, считаем минутами
-        except:
-            await message.answer("❌ Формат: <code>/clearcache 10m</code> (или 1h, 1d)", parse_mode="HTML")
-            return
-
-    if minutes > 0:
-        try:
-            from services.database_service import clear_cache_older_than
-            await clear_cache_older_than(minutes)
-            await message.answer(f"🗑️ Кэш за последние <b>{args[1]}</b> очищен.", parse_mode="HTML")
-            await send_log("ADMIN", f"Cache cleared (> {args[1]})", admin=message.from_user)
-        except ImportError:
-            await message.answer("⚠️ Функция выборочной очистки недоступна в базе данных.")
-    else:
-        # Полная очистка
-        await clear_file_cache()
-        await message.answer("🗑️ <b>Весь кэш файлов полностью очищен!</b>", parse_mode="HTML")
-        await send_log("ADMIN", "Full cache cleared", admin=message.from_user)
-
-# --- LIMIT MANAGER ---
-@router.message(Command("limit"))
-async def cmd_limit(message: types.Message):
-    if not is_admin(message.from_user.id): return
-    
-    args = message.text.split()
-    
-    # Если просто /limit - показываем статус
-    if len(args) == 1:
-        mode = queue_manager.limit_mode
-        try:
-            active = sum(len(tasks) for tasks in queue_manager.user_tasks.values())
-        except:
-            active = 0
+        # Count temp files (cache)
+        cache_count = 0
+        if os.path.exists("tempfiles"):
+            cache_count = len([f for f in os.listdir("tempfiles") if os.path.isfile(os.path.join("tempfiles", f))])
         
+        # Format uptime
+        if uptime_days >= 1:
+            uptime_str = f"{int(uptime_days)}d {int(uptime_hours % 24)}h"
+        else:
+            uptime_str = f"{int(uptime_hours)}h {int((uptime_seconds % 3600) / 60)}m"
+
         text = (
-            f"🚦 <b>Limit Status:</b>\n"
-            f"Mode: <b>{mode.upper()}</b>\n"
-            f"Active tasks: {active}\n\n"
-            f"🔹 <code>/limit on</code> - Общий лимит (все ждут)\n"
-            f"🔹 <code>/limit user</code> - Лимит на юзера (Админы безлимит)\n"
-            f"🔹 <code>/limit off</code> - Без лимитов (Опасно)"
+            "🤖 Bot Status\n"
+            "═" * 25 + "\n\n"
+            f"⏱ Ping: {ping:.2f}ms\n"
+            f"⏰ Uptime: {uptime_str}\n"
+            f"📊 Commands processed: {BOT_COMMAND_COUNT}\n\n"
+            f"👥 Users: {count}\n"
+            f"✅ Active: {active}\n"
+            f"🚫 Banned: {banned}\n\n"
+            f"💾 Cache files: {cache_count}\n"
+            f"🐍 Python: {sys.version.split()[0]}"
         )
-        await message.answer(text, parse_mode="HTML")
-        return
+        await message.answer(text, disable_notification=True)
+        logger.info(f"Admin {message.from_user.id} used /status")
+    except Exception as e:
+        logger.error(f"Error in /status: {e}")
+        await message.answer("Error getting bot status", disable_notification=True)
 
-    # Установка режима
-    new_mode = args[1].lower()
-    if new_mode not in ['on', 'off', 'user']:
-        await message.answer("❌ Invalid mode. Use: <b>on / off / user</b>", parse_mode="HTML")
-        return
-
-    queue_manager.set_mode(new_mode)
-    await set_system_value("limit_mode", new_mode)
+def parse_time_to_seconds(time_str: str) -> int:
+    """Парсит строку времени типа '5m', '1h', '1d' в секунды"""
+    match = re.match(r"^(\d+)([smhd])$", time_str.lower().strip())
+    if not match:
+        return None
     
-    await message.answer(f"✅ Limit mode set to: <b>{new_mode.upper()}</b>", parse_mode="HTML")
-    await send_log("ADMIN", f"Limit mode changed -> {new_mode}", admin=message.from_user)
+    value, unit = match.groups()
+    value = int(value)
+    
+    multipliers = {
+        's': 1,
+        'm': 60,
+        'h': 3600,
+        'd': 86400
+    }
+    
+    return value * multipliers.get(unit, 1)
+
+@router.message(Command("clearcache"))
+async def cmd_clearcache(message: types.Message, command: CommandObject):
+    """Clear cache with time argument: /clearcache [5m|1h|1d|all]"""
+    try:
+        if not command.args:
+            kb = InlineKeyboardMarkup(inline_keyboard=[
+                [
+                    InlineKeyboardButton(text="5 минут", callback_data="cache_5m"),
+                    InlineKeyboardButton(text="1 час", callback_data="cache_1h"),
+                ],
+                [
+                    InlineKeyboardButton(text="1 день", callback_data="cache_1d"),
+                    InlineKeyboardButton(text="Весь кеш", callback_data="cache_all"),
+                ]
+            ])
+            await message.answer("Выберите время удаления кеша file_id:", reply_markup=kb, disable_notification=True)
+            return
+        
+        time_arg = command.args.strip()
+        
+        if time_arg == "all":
+            if os.path.exists("tempfiles"):
+                import shutil
+                shutil.rmtree("tempfiles")
+                os.makedirs("tempfiles", exist_ok=True)
+                await message.answer("✅ Весь file_id кеш удален", disable_notification=True)
+                logger.info(f"Admin {message.from_user.id} cleared all cache")
+            else:
+                await message.answer("❌ Нет кеша для удаления", disable_notification=True)
+        else:
+            seconds = parse_time_to_seconds(time_arg)
+            if not seconds:
+                await message.answer("❌ Неверный формат времени. Используйте: 5m, 1h, 1d или all", disable_notification=True)
+                return
+            
+            now = time.time()
+            deleted_count = 0
+            
+            if os.path.exists("tempfiles"):
+                for filename in os.listdir("tempfiles"):
+                    filepath = os.path.join("tempfiles", filename)
+                    if os.path.isfile(filepath):
+                        file_age = now - os.path.getmtime(filepath)
+                        if file_age > seconds:
+                            try:
+                                os.remove(filepath)
+                                deleted_count += 1
+                            except:
+                                pass
+            
+            await message.answer(f"✅ Удалено файлов: {deleted_count}", disable_notification=True)
+            logger.info(f"Admin {message.from_user.id} cleared cache older than {time_arg}")
+    except Exception as e:
+        logger.error(f"Error in /clearcache: {e}")
+        await message.answer("❌ Ошибка при удалении кеша", disable_notification=True)
+
+@router.callback_query(F.data.startswith("cache_"))
+async def handle_cache_button(query: types.CallbackQuery):
+    """Обработчик кнопок очистки кеша"""
+    try:
+        action = query.data.replace("cache_", "")
+        
+        if action == "all":
+            if os.path.exists("tempfiles"):
+                import shutil
+                shutil.rmtree("tempfiles")
+                os.makedirs("tempfiles", exist_ok=True)
+                await query.answer("✅ Весь file_id кеш удален", show_alert=True)
+                logger.info(f"Admin {query.from_user.id} cleared all cache via button")
+            else:
+                await query.answer("❌ Нет кеша", show_alert=True)
+        else:
+            seconds = parse_time_to_seconds(action)
+            if seconds:
+                now = time.time()
+                deleted_count = 0
+                
+                if os.path.exists("tempfiles"):
+                    for filename in os.listdir("tempfiles"):
+                        filepath = os.path.join("tempfiles", filename)
+                        if os.path.isfile(filepath):
+                            file_age = now - os.path.getmtime(filepath)
+                            if file_age > seconds:
+                                try:
+                                    os.remove(filepath)
+                                    deleted_count += 1
+                                except:
+                                    pass
+                
+                await query.answer(f"✅ Удалено: {deleted_count} файлов", show_alert=True)
+                logger.info(f"Admin {query.from_user.id} cleared cache older than {action} via button")
+        
+        await query.message.delete()
+    except Exception as e:
+        logger.error(f"Error in cache callback: {e}")
+        await query.answer("❌ Ошибка", show_alert=True)

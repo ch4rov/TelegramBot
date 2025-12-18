@@ -1,0 +1,18 @@
+{
+    "ask_lang": "Hello! Please choose your language",
+    "lang_selected": "Language set to English",
+    "welcome_new": "Hello, {name}! Welcome to the bot",
+    "welcome_back": "Welcome back, {name}!",
+    "welcome_first": "👋 Hello!\n\nWelcome to ch4roBO - bot for downloading media from various platforms.\n\nPrivacy Policy:\nhttps://telegra.ph/ch4roBO---Politika-ispolzovaniya-12-18\n\nBy using the bot, you automatically agree to the policy. Data administrator: @ch4rov",
+    "menu_main": "Main Menu\n\nAvailable commands:\n/login - Link Last.FM\n/addcookies - Add cookies\n/videomessage - Video mode",
+    "btn_video_mode": "Video Mode",
+    "btn_add_cookies": "Add Cookies",
+    "btn_login": "Login LastFM",
+    "error_generic": "Something went wrong",
+    "login_usage": "Usage: /login YOUR_LASTFM_USERNAME",
+    "login_current": "Linked Last.FM account: {username}",
+    "login_success": "Last.FM account set to: {username}",
+    "banned_user": "You are banned from using this bot.",
+    "user_banned": "🚫 You have been banned from this bot.\n📄 Reason: {reason}\n📞 Admin contact: @ch4rov",
+    "user_unbanned": "✅ You have been unbanned!"
+}

@@ -1,76 +1,92 @@
+# -*- coding: utf-8 -*-
 import asyncio
 import logging
 import sys
-import os
-import shutil
+
 from aiogram import Bot, Dispatcher
-from aiogram.enums import ParseMode
 from aiogram.client.default import DefaultBotProperties
-from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
-from aiohttp import web
+from aiogram.enums import ParseMode
 
-import settings
-from services.database_service import init_db, get_all_users, clear_file_cache
-from handlers import user, admin, inline_handler, search_handler
+# Импорты конфигурации и базы
+from core.config import config
+from core.loader import bot, dp, on_startup, on_shutdown
+from core.logger import setup_logger
+from core.commands_updater import set_bot_commands
+from services.database.core import init_db
+from services.placeholder_service import ensure_placeholders
+
+# Импорты мидлварей
+from middlewares.logger import LoggingMiddleware
+from middlewares.language import LanguageMiddleware
 from middlewares.antiflood import ThrottlingMiddleware
-from core.logger_system import setup_logger, sys_log
 
-async def on_startup(bot: Bot):
-    await init_db()
-    
-    # АВТОМАТИЧЕСКИ ПОЛУЧАЕМ ЮЗЕРНЕЙМ БОТА
+# === ИМПОРТЫ РОУТЕРОВ ===
+# 1. Админка
+from handlers.admin import admin_router
+
+# 2. Пользовательская часть - импортируем готовый user_router из __init__.py
+from handlers.user import user_router
+
+# 3. Инлайн и поиск
+from handlers import inline_handler, search_handler
+
+async def main():
+    # Настройка логирования (на консоль и в файл)
+    setup_logger()
+    logger = logging.getLogger(__name__)
+    logger.info("Starting bot initialization...")
+
+    # Инициализация БД
     try:
-        bot_info = await bot.get_me()
-        settings.BOT_USERNAME = bot_info.username
-        await sys_log(bot, f"Bot initialized as @{settings.BOT_USERNAME}")
+        await init_db()
+        logger.info("Database initialized successfully")
     except Exception as e:
-        await sys_log(bot, f"Failed to get bot username: {e}")
+        logger.error(f"Database initialization error: {e}")
 
-    if settings.IS_TEST_ENV:
-        await clear_file_cache()
-        if os.path.exists("downloads"):
-            shutil.rmtree("downloads", ignore_errors=True)
-            os.makedirs("downloads")
-        await sys_log(bot, "Bot started in TEST mode. Cache cleared.")
-    else:
-        await sys_log(bot, "Bot started.")
+    # Ensure inline placeholders exist (cached file_ids for inline mode)
+    try:
+        await ensure_placeholders()
+    except Exception as e:
+        logger.error(f"Error ensuring placeholders: {e}")
+
+    # Обновляем команды бота в Telegram UI
+    try:
+        await set_bot_commands(bot)
+        logger.info("Bot commands updated successfully")
+    except Exception as e:
+        logger.error(f"Error updating bot commands: {e}")
+
+    # Регистрация Middleware (порядок важен!)
+    dp.message.middleware(LoggingMiddleware())
+    dp.callback_query.middleware(LoggingMiddleware())
+    dp.message.middleware(LanguageMiddleware())
+    dp.message.middleware(ThrottlingMiddleware(limit=0.7))
+
+    # === РЕГИСТРАЦИЯ РОУТЕРОВ ===
     
-    users = await get_all_users()
-    print(f"Users in DB: {len(users)}")
-
-async def on_shutdown(bot: Bot):
-    await sys_log(bot, "Bot stopped.")
-    await bot.session.close()
-
-def main():
-    if sys.platform == 'win32':
-        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
-
-    logging.basicConfig(level=logging.INFO, stream=sys.stdout)
+    # 1. Админка
+    dp.include_router(admin_router)
     
-    bot = Bot(token=settings.BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
-    dp = Dispatcher()
-
-    dp.message.middleware(ThrottlingMiddleware())
+    # 2. User Router
+    dp.include_router(user_router)
     
-    setup_logger(dp)
-    
-    dp.include_router(admin.admin_router)
-    dp.include_router(user.user_router)
+    # 3. Inline & Search
     dp.include_router(inline_handler.router)
     dp.include_router(search_handler.router)
 
+    # Регистрация событий
     dp.startup.register(on_startup)
     dp.shutdown.register(on_shutdown)
 
-    if settings.USE_WEBHOOK:
-        app = web.Application()
-        webhook_requests_handler = SimpleRequestHandler(dispatcher=dp, bot=bot)
-        webhook_requests_handler.register(app, path=settings.WEBHOOK_PATH)
-        setup_application(app, dp, bot=bot)
-        web.run_app(app, host=settings.WEBHOOK_HOST, port=settings.WEBHOOK_PORT)
-    else:
-        asyncio.run(dp.start_polling(bot))
+    # Запуск
+    logger.info("Starting polling...")
+    await bot.delete_webhook(drop_pending_updates=config.DROP_PENDING_UPDATES)
+    await dp.start_polling(bot)
 
 if __name__ == "__main__":
-    main()
+    try:
+        if sys.platform == "win32":
+            asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print("Bot stopped.")

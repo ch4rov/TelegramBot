@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 import os
 import zipfile
 import io
@@ -27,17 +28,15 @@ def check_and_install_ffmpeg():
     
     # Проверяем наличие
     if os.path.exists(ffmpeg_exe_path) and os.path.exists(ffprobe_exe_path):
-        print(f"✅ [SYSTEM] FFmpeg найден: {ffmpeg_exe_path}")
+        print("[SYSTEM] FFmpeg found: " + ffmpeg_exe_path)
         return
 
-    print(f"⚠️ [SYSTEM] FFmpeg не найден. Скачивание в: {TARGET_DIR}")
-    print(f"⬇️ Скачивание архива...")
+    print("[SYSTEM] FFmpeg not found. Downloading to: " + TARGET_DIR)
+    print("[SYSTEM] Downloading archive...")
 
     try:
         with urllib.request.urlopen(FFMPEG_URL, timeout=60) as response:
             zip_data = response.read()
-
-        print("📦 Распаковка...")
 
         with zipfile.ZipFile(io.BytesIO(zip_data)) as z:
             temp_extract_dir = os.path.join(TARGET_DIR, "temp_extract")
@@ -62,11 +61,11 @@ def check_and_install_ffmpeg():
             shutil.rmtree(temp_extract_dir)
 
         if found_ffmpeg and found_ffprobe:
-            print("✅ [SYSTEM] FFmpeg успешно установлен!")
+            print("[SYSTEM] FFmpeg successfully installed!")
         else:
-            print("❌ [ERROR] Не удалось найти ffmpeg.exe внутри архива.")
+            print("[ERROR] Could not find ffmpeg.exe in archive.")
             sys.exit(1)
 
     except Exception as e:
-        print(f"❌ [ERROR] Ошибка установки FFmpeg: {e}")
+        print("[ERROR] FFmpeg installation error: " + str(e))
         # Не выходим через sys.exit, чтобы бот мог попробовать запуститься (хотя без ffmpeg видео не будет)

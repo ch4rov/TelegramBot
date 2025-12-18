@@ -202,12 +202,10 @@ cython_debug/
 
 # Marimo
 logs/files/
-users.db
+/bot.db
 *.pyc
 *.log
 *.txt
 core/installs/ffmpeg.exe
 core/installs/ffprobe.exe
-/downloads
-services/platforms/YandexDownloader/cookies_yandex_ru.txt
-services/platforms/YandexDownloader/cookies_yandex_by.txt
+/tempfiles

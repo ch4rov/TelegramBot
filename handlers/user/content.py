@@ -11,7 +11,7 @@ from aiogram.enums import ChatAction
 from aiogram.exceptions import TelegramRetryAfter
 
 from .router import user_router, check_access_and_update
-from services.database_service import get_cached_file, save_cached_file, get_user_cookie, get_module_status
+from services.database.core import get_cached_file, save_cached_file, get_user_cookie, get_module_status
 from core.logger_system import logger
 from services.platforms.platform_manager import download_content, is_valid_url
 from services.platforms.SpotifyDownloader.spotify_strategy import SpotifyStrategy

@@ -1,6 +1,6 @@
 import os
 import importlib
-from services.database_service import get_user_language
+from services.database.core import get_user_language
 
 LANGUAGES = {}
 DEFAULT_LANG = 'en'

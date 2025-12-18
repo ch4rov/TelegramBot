@@ -1,7 +1,7 @@
 """Access control and authorization management"""
 import os
 from aiogram import types
-from services.database_service import add_or_update_user
+from services.database.core import add_or_update_user
 
 
 class AccessManager:

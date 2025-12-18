@@ -1,7 +1,7 @@
 from aiogram import types
 from aiogram.filters import Command
 from .router import admin_router, is_admin
-from services.database_service import get_all_users, set_ban_status
+from services.database.core import get_all_users, set_ban_status
 # --- ИСПРАВЛЕННЫЙ ИМПОРТ ---
 from core.logger_system import send_log
 # ---------------------------
@@ -73,7 +73,7 @@ async def cmd_answer(message: types.Message):
         await message.answer("✅ Sent")
         
         # Логируем ответ в историю
-        from services.database_service import log_activity
+        from services.database.core import log_activity
         await log_activity(uid, "Admin", "ADMIN", txt)
         await send_log("ADMIN", f"Answer to {uid}: {txt}", admin=message.from_user)
     except: await message.answer("Usage: <code>/answer ID TEXT</code> or reply", parse_mode="HTML")

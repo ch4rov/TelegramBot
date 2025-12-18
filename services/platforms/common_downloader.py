@@ -47,10 +47,12 @@ class CommonDownloader(ABC):
         local_ffmpeg = os.path.join(base_dir, "core", "installs", "ffmpeg.exe")
         
         ffmpeg_location = None
-        if os.path.exists(local_ffmpeg): 
-            ffmpeg_location = os.path.dirname(local_ffmpeg)
-        elif shutil.which("ffmpeg"): 
-            ffmpeg_location = None
+        if os.path.exists(local_ffmpeg):
+            ffmpeg_location = local_ffmpeg  # полный путь к локальному бинарю
+        else:
+            system_ffmpeg = shutil.which("ffmpeg")
+            if system_ffmpeg:
+                ffmpeg_location = system_ffmpeg
         else:
             return None, None, "System Error: FFmpeg missing.", None
 
@@ -113,8 +115,20 @@ class CommonDownloader(ABC):
             ydl_opts['postprocessors'].append({'key': 'FFmpegThumbnailsConvertor', 'format': 'jpg'})
             ydl_opts['postprocessors'].append({'key': 'FFmpegMetadata', 'add_metadata': True})
 
-        if ffmpeg_location: 
-            ydl_opts['ffmpeg_location'] = ffmpeg_location
+        if ffmpeg_location:
+            # yt-dlp принимает либо путь к бинарю, либо директорию; даём оба
+            if os.path.isfile(ffmpeg_location):
+                ydl_opts['ffmpeg_location'] = ffmpeg_location
+                ffmpeg_dir = os.path.dirname(ffmpeg_location)
+            else:
+                ydl_opts['ffmpeg_location'] = ffmpeg_location
+                ffmpeg_dir = ffmpeg_location
+
+            ydl_opts['prefer_ffmpeg'] = True
+
+            # Добавляем в PATH на всякий случай
+            if ffmpeg_dir:
+                os.environ["PATH"] = f"{ffmpeg_dir}{os.pathsep}" + os.environ.get("PATH", "")
 
         if user_cookie_content:
             cpath = os.path.join(self.download_path, "user.txt")

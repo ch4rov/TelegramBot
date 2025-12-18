@@ -8,23 +8,23 @@ def main():
     check_and_install_ffmpeg()
 
     while True:
-        print("\n🔋 [RUNNER] Запуск main.py...")
+        print("\n[RUNNER] Starting main.py...")
         process = subprocess.Popen([sys.executable, "main.py"])
         
         try:
             process.wait()
         except KeyboardInterrupt:
-            print("\n🛑 Останавливаю бота...")
+            print("\n[RUNNER] Stopping bot...")
             process.terminate()
             
             try:
-                subprocess.run(f"taskkill /F /T /PID {process.pid}", shell=True, stderr=subprocess.DEVNULL)
+                subprocess.run("taskkill /F /T /PID " + str(process.pid), shell=True, stderr=subprocess.DEVNULL)
             except: pass
             
             break
 
         exit_code = process.returncode
-        print(f"⚠️ [RUNNER] Бот упал (код {exit_code}). Перезапуск через 5 сек...")
+        print("[RUNNER] Bot crashed (code " + str(exit_code) + "). Restarting in 5 sec...")
         time.sleep(5)
 
 if __name__ == "__main__":
