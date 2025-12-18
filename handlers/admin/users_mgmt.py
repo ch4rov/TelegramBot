@@ -41,8 +41,10 @@ async def cmd_users(message: types.Message):
             text += "👥 Группы:\n"
             for g in groups:
                 status = "✅" if not g.is_banned else "❌"
-                username = g.username or "(no username)"
-                text += f"{status} {username} | {g.id}\n"
+                title = (g.full_name or "").strip()
+                handle = (g.username or "").strip()
+                label = title or (f"@{handle}" if handle else "(no title)")
+                text += f"{status} {label} | {g.id}\n"
             text += "\n"
         
         if users_list:
@@ -79,11 +81,11 @@ async def cmd_ban(message: types.Message, command: CommandObject):
         user_id_str = args[0]
         reason = args[1] if len(args) > 1 else "Banned by admin"
 
-        if not user_id_str.isdigit():
-            await message.answer("Invalid user ID", disable_notification=True)
+        try:
+            user_id = int(user_id_str)
+        except Exception:
+            await message.answer("Invalid ID", disable_notification=True)
             return
-        
-        user_id = int(user_id_str)
         success = await ban_user(user_id, reason)
         
         if success:
@@ -97,7 +99,7 @@ async def cmd_ban(message: types.Message, command: CommandObject):
             
             try:
                 await bot.send_message(user_id, ban_msg, disable_notification=True)
-            except:
+            except Exception:
                 pass
             
             if len(args) > 1:

@@ -75,4 +75,5 @@ BOT_COMMANDS_LIST = [
     ("modules", "Manage Modules", "Управление модулями", "admin", True),
     ("edituser", "Edit user/group", "Редактировать пользователя/группу", "admin", True),
     ("update", "Update bot commands", "Обновить команды", "admin", True),
+    ("savedb", "Save DB to tech chat", "Сохранить БД в тех-чат", "admin", True),
 ]

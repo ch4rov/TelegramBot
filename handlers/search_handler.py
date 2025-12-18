@@ -27,6 +27,38 @@ CAPTION_MAX_LEN = 1024
 ACTION_UPLOAD_AUDIO = getattr(ChatAction, "UPLOAD_AUDIO", ChatAction.UPLOAD_DOCUMENT)
 
 
+def _is_tiktok_cookie_required(url: str, error: str) -> bool:
+    try:
+        u = (url or "").lower()
+        e = (error or "").lower()
+        if "tiktok" not in u:
+            return False
+        # Typical yt-dlp messages for age/region/auth-gated TikTok posts
+        markers = [
+            "log in for access",
+            "this post may not be comfortable",
+            "use --cookies",
+            "cookies-from-browser",
+            "for the authentication",
+        ]
+        return any(m in e for m in markers)
+    except Exception:
+        return False
+
+
+def _tiktok_cookies_hint(user_lang: str | None = None) -> str:
+    lang = (user_lang or "en").lower()
+    if lang == "ru":
+        return (
+            "⚠️ TikTok: для этого видео нужны куки (ограничение по возрасту/контенту).\n"
+            "Вызови /addcookies → TikTok и отправь cookies.txt (Netscape format)."
+        )
+    return (
+        "⚠️ TikTok: this post requires cookies (age/content restriction).\n"
+        "Run /addcookies → TikTok and send a cookies.txt (Netscape format)."
+    )
+
+
 class _ActionPulsar:
     def __init__(self, bot, chat_id: int, action: ChatAction, interval_s: float = 4.0):
         self._bot = bot
@@ -319,7 +351,10 @@ async def handle_music_selection(cb: types.CallbackQuery, user_lang: str = "en")
         except Exception:
             pass
         try:
-            await cb.message.answer(f"❌ {html.escape(str(error))}", parse_mode="HTML")
+            if _is_tiktok_cookie_required(src_url, str(error)):
+                await cb.message.answer(_tiktok_cookies_hint(user_lang), disable_web_page_preview=True)
+            else:
+                await cb.message.answer(f"❌ {html.escape(str(error))}", parse_mode="HTML")
         except Exception:
             pass
         if folder:
@@ -411,7 +446,10 @@ async def cb_download_ytm_clip(cb: types.CallbackQuery, user_lang: str = "en"):
         if pulsar:
             await pulsar.stop()
         try:
-            await cb.message.answer(f"❌ {html.escape(error)}", parse_mode="HTML")
+            if _is_tiktok_cookie_required(src_url, str(error)):
+                await cb.message.answer(_tiktok_cookies_hint(user_lang), disable_web_page_preview=True)
+            else:
+                await cb.message.answer(f"❌ {html.escape(error)}", parse_mode="HTML")
         except Exception:
             pass
         if folder:
@@ -558,7 +596,10 @@ async def message_handler(message: types.Message, user_lang: str = "en"):
             if pulsar:
                 await pulsar.stop()
             try:
-                await message.answer(f"❌ {html.escape(str(error))}", parse_mode="HTML")
+                if _is_tiktok_cookie_required(src_url, str(error)):
+                    await message.answer(_tiktok_cookies_hint(user_lang), disable_web_page_preview=True)
+                else:
+                    await message.answer(f"❌ {html.escape(str(error))}", parse_mode="HTML")
             except Exception:
                 pass
             if folder: shutil.rmtree(folder, ignore_errors=True)

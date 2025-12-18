@@ -21,6 +21,7 @@ from middlewares.language import LanguageMiddleware
 from middlewares.antiflood import ThrottlingMiddleware
 from middlewares.registration import RegistrationMiddleware
 from middlewares.test_mode_guard import TestModeGuardMiddleware
+from middlewares.ban_guard import BanGuardMiddleware
 
 # === ИМПОРТЫ РОУТЕРОВ ===
 # 1. Админка
@@ -64,6 +65,9 @@ async def main():
 
     # 1) Ensure user/group exists in DB for any update
     dp.update.middleware(RegistrationMiddleware())
+
+    # 2) Block banned users and banned chats
+    dp.update.middleware(BanGuardMiddleware())
 
     dp.message.middleware(LoggingMiddleware())
     dp.callback_query.middleware(LoggingMiddleware())

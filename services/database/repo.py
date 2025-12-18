@@ -78,20 +78,55 @@ async def ensure_user_exists(
             existing = await session.execute(select(User).where(User.id == user_id))
             user = existing.scalar_one_or_none()
             if user:
-                # Keep DB in sync with latest visible fields without counting as interaction
+                now = datetime.now()
+                hours_passed = 9999.0
+                try:
+                    if user.username_updated_at:
+                        hours_passed = (now - user.username_updated_at).total_seconds() / 3600
+                except Exception:
+                    hours_passed = 9999.0
+
+                allow_profile_refresh = hours_passed >= 24
+                bump_profile_ts = False
+
                 update_data = {
-                    "full_name": full_name,
-                    "last_seen": datetime.now(),
+                    "last_seen": now,
                     "is_active": True,
                 }
+
+                # Tag may change (e.g., group->supergroup)
                 if tag:
                     update_data["user_tag"] = tag
-                if username:
-                    update_data["username"] = username
-                    update_data["username_updated_at"] = datetime.now()
 
-                stmt = update(User).where(User.id == user_id).values(**update_data)
-                await session.execute(stmt)
+                # Users: keep full_name reasonably fresh
+                if user_id > 0:
+                    if full_name and full_name != user.full_name:
+                        update_data["full_name"] = full_name
+
+                # Groups/chats: update title not more than once per 24h
+                if user_id < 0:
+                    desired_title = full_name
+                    if desired_title:
+                        if not user.full_name:
+                            update_data["full_name"] = desired_title
+                        elif allow_profile_refresh and desired_title != user.full_name:
+                            update_data["full_name"] = desired_title
+                            bump_profile_ts = True
+
+                # Username: update not more than once per 24h (or if empty)
+                if username:
+                    if not user.username:
+                        update_data["username"] = username
+                    elif allow_profile_refresh and username != user.username:
+                        update_data["username"] = username
+                        bump_profile_ts = True
+
+                if bump_profile_ts and allow_profile_refresh:
+                    update_data["username_updated_at"] = now
+
+                if update_data:
+                    stmt = update(User).where(User.id == user_id).values(**update_data)
+                    await session.execute(stmt)
             else:
                 session.add(
                     User(

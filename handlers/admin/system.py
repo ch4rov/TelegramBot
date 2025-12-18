@@ -40,6 +40,70 @@ async def _run_git(args: list[str], cwd: str) -> tuple[int, str, str]:
 def _repo_root() -> str:
     return os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 
+
+def _get_tech_chat_id() -> int | None:
+    raw = (os.getenv("TECH_CHAT_ID") or "").strip()
+    if raw and raw.lstrip("-").isdigit():
+        try:
+            return int(raw)
+        except Exception:
+            return None
+    return None
+
+
+def _get_sqlite_db_path() -> str | None:
+    # Prefer config.DB_URL (sqlite+aiosqlite:////path)
+    try:
+        from core.config import config
+        db_url = getattr(config, "DB_URL", "") or ""
+        if db_url.startswith("sqlite+") and ":///" in db_url:
+            path = db_url.split(":///", 1)[1]
+            path = path.strip()
+            if path:
+                return path
+    except Exception:
+        pass
+
+    # Fallback to DB_PATH env
+    try:
+        db_path = (os.getenv("DB_PATH") or "").strip()
+        if db_path:
+            return db_path
+    except Exception:
+        pass
+    return None
+
+
+async def send_db_backup(bot, caption: str | None = None) -> bool:
+    """Send current sqlite DB file to TECH_CHAT_ID. Returns True on success."""
+    tech_chat_id = _get_tech_chat_id()
+    if not tech_chat_id:
+        return False
+
+    db_path = _get_sqlite_db_path()
+    if not db_path:
+        return False
+
+    if not os.path.isabs(db_path):
+        # treat as relative to repo root
+        db_path = os.path.join(_repo_root(), db_path)
+
+    if not os.path.exists(db_path):
+        return False
+
+    try:
+        from aiogram.types import FSInputFile
+        await bot.send_document(
+            tech_chat_id,
+            FSInputFile(db_path),
+            caption=caption or "💾 DB backup",
+            disable_notification=True,
+        )
+        return True
+    except Exception:
+        logger.exception("Failed to send DB backup")
+        return False
+
 # Время запуска бота
 BOT_START_TIME = time.time()
 BOT_COMMAND_COUNT = 0
@@ -79,15 +143,16 @@ async def cmd_status(message: types.Message):
 
         text = (
             "🤖 Bot Status\n"
-            "═" * 25 + "\n\n"
-            f"⏱ Ping: {ping:.2f}ms\n"
-            f"⏰ Uptime: {uptime_str}\n"
-            f"📊 Commands processed: {BOT_COMMAND_COUNT}\n\n"
-            f"👥 Users: {count}\n"
-            f"✅ Active: {active}\n"
-            f"🚫 Banned: {banned}\n\n"
-            f"💾 Cache files: {cache_count}\n"
-            f"🐍 Python: {sys.version.split()[0]}"
+            + ("═" * 25)
+            + "\n\n"
+            + f"⏱ Ping: {ping:.2f}ms\n"
+            + f"⏰ Uptime: {uptime_str}\n"
+            + f"📊 Commands processed: {BOT_COMMAND_COUNT}\n\n"
+            + f"👥 Users: {count}\n"
+            + f"✅ Active: {active}\n"
+            + f"🚫 Banned: {banned}\n\n"
+            + f"💾 Cache files: {cache_count}\n"
+            + f"🐍 Python: {sys.version.split()[0]}"
         )
         await message.answer(text, disable_notification=True)
         logger.info(f"Admin {message.from_user.id} used /status")
@@ -209,6 +274,16 @@ async def handle_cache_button(query: types.CallbackQuery):
     except Exception as e:
         logger.error(f"Error in cache callback: {e}")
         await query.answer("❌ Ошибка", show_alert=True)
+
+
+@router.message(Command("savedb"))
+async def cmd_savedb(message: types.Message):
+    """Send DB backup to technical chat (TECH_CHAT_ID)."""
+    ok = await send_db_backup(message.bot, caption=f"💾 DB backup (by {message.from_user.id})")
+    if ok:
+        await message.answer("✅ Backup sent to tech chat", disable_notification=True)
+    else:
+        await message.answer("❌ Backup failed (check TECH_CHAT_ID and DB settings)", disable_notification=True)
 
 
 @router.message(Command("update"))

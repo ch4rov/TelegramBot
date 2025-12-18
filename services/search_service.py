@@ -1,49 +1,32 @@
 import asyncio
-import traceback
 import yt_dlp
-from youtubesearchpython import VideosSearch
+
+
+def _norm_duration(seconds: int | None) -> str:
+    try:
+        if not seconds or seconds <= 0:
+            return "?:??"
+        m, s = divmod(int(seconds), 60)
+        h, m = divmod(m, 60)
+        if h:
+            return f"{h}:{m:02d}:{s:02d}"
+        return f"{m}:{s:02d}"
+    except Exception:
+        return "?:??"
 
 
 async def search_music(query: str, limit: int = 5):
     print(f"🔍 [SEARCH] Запрос: '{query}'") # Обычный принт
 
-    # --- СПОСОБ 1: БЫСТРАЯ БИБЛИОТЕКА ---
-    try:
-        # print("   --> Попытка 1: youtube-search-python...") # Можно закомментить лишнее
-        
-        def _lib_search():
-            search = VideosSearch(query, limit=limit)
-            return search.result()
-
-        loop = asyncio.get_event_loop()
-        raw_data = await loop.run_in_executor(None, _lib_search)
-        
-        if raw_data and 'result' in raw_data and len(raw_data['result']) > 0:
-            results = []
-            for item in raw_data['result']:
-                results.append({
-                    'source': 'YT',
-                    'id': item['id'],
-                    'url': item['link'],
-                    'title': item['title'],
-                    'duration': item.get('duration') or "Live",
-                    'uploader': item['channel']['name']
-                })
-            print(f"✅ Найдено {len(results)} треков.")
-            return results
-            
-    except Exception as e:
-        print(f"⚠️ Ошибка библиотеки поиска: {e}")
-
-    # --- СПОСОБ 2: РЕЗЕРВ (YT-DLP) ---
-    print("⚠️ Переход на резервный поиск (YT-DLP)...")
-    results_yt = await _run_ytdlp_search(query, f'ytsearch{limit}')
+    # yt-dlp search is the most stable option in production
+    print("⚠️ Поиск через YT-DLP...")
+    results_yt = await _run_ytdlp_search(query, engine="ytsearch", limit=limit)
     
     if results_yt:
         return results_yt
 
-    # --- СПОСОБ 3: РЕЗЕРВ (SoundCloud) ---
-    results_sc = await _run_ytdlp_search(query, f'scsearch{limit}')
+    # --- РЕЗЕРВ (SoundCloud) ---
+    results_sc = await _run_ytdlp_search(query, engine="scsearch", limit=limit)
     
     if results_sc:
         return results_sc
@@ -51,14 +34,14 @@ async def search_music(query: str, limit: int = 5):
     print("❌ Ничего не найдено.")
     return []
 
-async def _run_ytdlp_search(query: str, engine_prefix: str):
-    """Внутренний поиск через yt-dlp"""
+async def _run_ytdlp_search(query: str, engine: str, limit: int):
+    """Внутренний поиск через yt-dlp."""
+    search_query = f"{engine}{int(limit)}:{query}"
     ydl_opts = {
         'format': 'bestaudio/best',
         'noplaylist': True,
         'quiet': True,
         'extract_flat': True,
-        'default_search': engine_prefix,
         'ignoreerrors': True,
         'no_warnings': True,
     }
@@ -66,7 +49,7 @@ async def _run_ytdlp_search(query: str, engine_prefix: str):
     def _search():
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             try:
-                info = ydl.extract_info(query, download=False)
+                info = ydl.extract_info(search_query, download=False)
                 if not info: return []
                 if 'entries' in info: return info['entries']
                 return []
@@ -87,11 +70,11 @@ async def _run_ytdlp_search(query: str, engine_prefix: str):
             url = item.get('url') or f"https://youtu.be/{vid_id}"
             
             clean.append({
-                'source': 'SC' if 'scsearch' in engine_prefix else 'YT',
+                'source': 'SC' if engine == 'scsearch' else 'YT',
                 'id': vid_id,
                 'url': url,
                 'title': title,
-                'duration': item.get('duration_string', '?:??'),
+                'duration': item.get('duration_string') or _norm_duration(item.get('duration')),
                 'uploader': item.get('uploader', 'Unknown')
             })
     return clean

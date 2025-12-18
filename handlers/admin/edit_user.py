@@ -116,7 +116,8 @@ def _render_card(entity_id: int, db_user, api_chat: types.Chat | None, api_error
     lines.append(f"<b>Tag:</b> {escape(db_user.user_tag or '—')}")
     lines.append(f"<b>Language:</b> {escape(db_user.language or 'en')}")
     lines.append(f"<b>Active:</b> {'✅' if db_user.is_active else '❌'}")
-    lines.append(f"<b>Banned:</b> {'⛔' if db_user.is_banned else '✅'}")
+    # Under a "Banned:" label, use ✅ to mean "yes, banned" (avoid ambiguity)
+    lines.append(f"<b>Banned:</b> {'✅' if db_user.is_banned else '❌'}")
     if db_user.is_banned and db_user.ban_reason:
         lines.append(f"<b>Ban reason:</b> {escape(db_user.ban_reason)}")
     lines.append(f"<b>First seen:</b> {_fmt_dt(db_user.first_seen)}")
