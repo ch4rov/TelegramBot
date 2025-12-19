@@ -45,6 +45,7 @@ class OAuthServer:
         port = int(config.OAUTH_HTTP_PORT)
 
         app = web.Application()
+        app.router.add_get("/", self._index)
         app.router.add_get("/health", self._health)
         app.router.add_get("/oauth/spotify/callback", self._spotify_callback)
 
@@ -71,6 +72,21 @@ class OAuthServer:
 
     async def _health(self, request: web.Request) -> web.Response:
         return web.Response(text="OK")
+
+    async def _index(self, request: web.Request) -> web.Response:
+        html = """<!doctype html>
+<html lang=\"en\">
+<head>
+  <meta charset=\"utf-8\" />
+  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />
+  <title>ch4rov.bot</title>
+</head>
+<body>
+  <iframe width=\"560\" height=\"315\" src=\"https://www.youtube.com/embed/dQw4w9WgXcQ?si=Zo-GMtmPb-4KBZQk\" title=\"YouTube video player\" frameborder=\"0\" allow=\"accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share\" referrerpolicy=\"strict-origin-when-cross-origin\" allowfullscreen></iframe>
+</body>
+</html>"""
+        return web.Response(text=html, status=200, content_type="text/html")
+
 
     def _redirect_uri(self, service: str) -> str:
         return f"{config.PUBLIC_BASE_URL}/oauth/{service}/callback"
