@@ -13,6 +13,7 @@ from aiogram.exceptions import TelegramBadRequest
 from aiogram.enums import ChatAction
 from core.config import config
 from services.database.repo import is_user_banned, increment_request_count
+from services.platforms.TelegramDownloader.workflow import fix_local_path
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -29,7 +30,26 @@ def _t(user_lang: str, key: str) -> str:
         )
     if key == "generic_error":
         return "❌ Ошибка обработки видео" if lang == "ru" else "❌ Error processing video"
+    if key == "local_file_404":
+        return (
+            "❌ Локальный Bot API не отдает файл по /file (404).\n\n"
+            "Что сделать:\n"
+            "1) Убедись, что LOCAL_SERVER_URL указывает прямо на Telegram Bot API server (его http-порт), а не на прокси, который проксирует только /bot.\n"
+            "2) Если используешь Nginx/прокси — добавь проксирование пути /file/.\n\n"
+            "Проверка: открой в браузере/через curl URL вида /file/bot<TOKEN>/... (должен скачиваться файл)."
+            if lang == "ru"
+            else
+            "❌ Local Bot API can't serve the file via /file (404).\n\n"
+            "Fix:\n"
+            "1) Make sure LOCAL_SERVER_URL points to the Telegram Bot API server HTTP port (not a proxy that only forwards /bot).\n"
+            "2) If you use Nginx/proxy — also proxy the /file/ path.\n\n"
+            "Check: open a /file/bot<TOKEN>/... URL (it should download)."
+        )
     return ""
+
+
+def _http_status(exc: Exception) -> int | None:
+    return getattr(exc, "status", None)
 
 
 async def _send_action(message: types.Message, action: ChatAction):
@@ -282,7 +302,24 @@ async def process_video(message: types.Message, user_lang: str = "en"):
         input_path = os.path.join(temp_dir, f"vid_in_{uuid.uuid4()}.mp4")
         output_path = os.path.join(temp_dir, f"vid_out_{uuid.uuid4()}.mp4")
         
-        await message.bot.download_file(file.file_path, input_path)
+        download_path = file.file_path
+        if config.USE_LOCAL_SERVER:
+            # Local Bot API may return an absolute container path; aiogram expects a relative path.
+            download_path = fix_local_path(download_path, message.bot.token)
+
+        try:
+            await message.bot.download_file(download_path, input_path)
+        except Exception as e:
+            logger.error(
+                "download_file failed (use_local=%s, file_path=%r, download_path=%r): %s",
+                config.USE_LOCAL_SERVER,
+                file.file_path,
+                download_path,
+                e,
+            )
+            if config.USE_LOCAL_SERVER and _http_status(e) == 404:
+                await message.answer(_t(user_lang, "local_file_404"), disable_notification=True)
+            raise
 
         # Stage: converting into video note
         current_action = ChatAction.RECORD_VIDEO_NOTE
@@ -335,6 +372,9 @@ async def process_video(message: types.Message, user_lang: str = "en"):
         logger.exception("Error processing video")
         if isinstance(e, TelegramBadRequest) and "file is too big" in str(e).lower():
             await message.answer(_t(user_lang, "too_big"), disable_notification=True)
+        elif config.USE_LOCAL_SERVER and _http_status(e) == 404:
+            # Already explained above (or here if raised upstream)
+            await message.answer(_t(user_lang, "local_file_404"), disable_notification=True)
         else:
             await message.answer(_t(user_lang, "generic_error"), disable_notification=True)
         try:

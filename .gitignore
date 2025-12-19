@@ -143,6 +143,14 @@ ENV/
 env.bak/
 venv.bak/
 
+# Runtime artifacts
+tempfiles/
+*.db
+*.db-journal
+bot.db
+users.db
+cookies.txt
+
 # Spyder project settings
 .spyderproject
 .spyproject

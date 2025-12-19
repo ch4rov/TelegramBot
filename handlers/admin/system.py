@@ -297,13 +297,18 @@ async def cmd_update(message: types.Message):
         await message.answer("❌ Not a git repository (cannot update).")
         return
 
-    rc, out, err = await _run_git(["status", "--porcelain"], cwd=repo)
+    # STABLE should not have local diffs; enforce a stable git view.
+    # 1) Ignore permission/filemode noise (common on servers)
+    await _run_git(["config", "core.filemode", "false"], cwd=repo)
+
+    # 2) Only block on tracked diffs; untracked runtime files should not block updates
+    rc, out, err = await _run_git(["status", "--porcelain", "--untracked-files=no"], cwd=repo)
     if rc != 0:
         await message.answer(f"❌ Git status failed: {err or out}")
         return
-    if (out or "").strip():
-        await message.answer("⚠️ Working tree has local changes. Commit/stash them before /update.")
-        return
+
+    # If tracked files are dirty, we'll force reset/clean during confirm step.
+    tracked_dirty = bool((out or "").strip())
 
     rc, branch, err = await _run_git(["rev-parse", "--abbrev-ref", "HEAD"], cwd=repo)
     branch = (branch or "").strip() or "main"
@@ -337,7 +342,7 @@ async def cmd_update(message: types.Message):
     rc, remote_sha, _ = await _run_git(["rev-parse", "--short", "@{u}"], cwd=repo)
     remote_sha = (remote_sha or "").strip()
 
-    _UPDATE_PENDING[message.from_user.id] = {"repo": repo, "branch": branch}
+    _UPDATE_PENDING[message.from_user.id] = {"repo": repo, "branch": branch, "tracked_dirty": tracked_dirty}
 
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [
@@ -349,7 +354,8 @@ async def cmd_update(message: types.Message):
         f"🔄 Updates available: <b>{behind_n}</b>\n"
         f"<b>Branch:</b> <code>{branch}</code>\n"
         f"<b>Local:</b> <code>{local_sha}</code> → <b>Remote:</b> <code>{remote_sha}</code>\n\n"
-        "Apply update?",
+        + ("⚠️ Local tracked changes will be discarded.\n" if tracked_dirty else "")
+        + "Apply update?",
         reply_markup=kb,
     )
 
@@ -378,6 +384,7 @@ async def cb_update(query: types.CallbackQuery):
         return
 
     repo = pending["repo"]
+    tracked_dirty = bool(pending.get("tracked_dirty"))
     _UPDATE_PENDING.pop(admin_id, None)
 
     await query.answer("Updating…")
@@ -385,6 +392,13 @@ async def cb_update(query: types.CallbackQuery):
         await query.message.edit_text("⏳ Pulling latest code…", reply_markup=None)
     except Exception:
         pass
+
+    # Force-clean worktree before pull (STABLE must stay clean)
+    if tracked_dirty:
+        await _run_git(["reset", "--hard", "HEAD"], cwd=repo)
+
+    # Remove untracked files (ignored files stay intact)
+    await _run_git(["clean", "-fd"], cwd=repo)
 
     rc, out, err = await _run_git(["pull", "--ff-only"], cwd=repo)
     if rc != 0:

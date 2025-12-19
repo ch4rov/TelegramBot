@@ -9,6 +9,8 @@ import yt_dlp
 from services.database.repo import get_user_cookie, get_global_cookie
 from core.config import config
 from services.odesli_service import get_links_by_url
+import subprocess
+import json
 
 logger = logging.getLogger(__name__)
 
@@ -94,6 +96,15 @@ async def download_content(url, custom_opts=None, user_id=None):
         'restrictfilenames': True,
     }
 
+    is_instagram = bool(re.search(URL_PATTERNS['instagram'], url))
+
+    # Instagram sometimes offers "storyboard"/still-image variants; prefer a real H.264 mp4 video when possible.
+    if is_instagram and 'format' not in ydl_opts and not (custom_opts and 'format' in custom_opts):
+        ydl_opts['format'] = 'bv*[ext=mp4][vcodec^=avc1]+ba[ext=m4a]/b[ext=mp4]/b'
+        ydl_opts['merge_output_format'] = 'mp4'
+        # Remux to mp4 if needed (no re-encode) when ffmpeg is available.
+        ydl_opts['remuxvideo'] = 'mp4'
+
     # Ensure yt-dlp can find ffmpeg/ffprobe (needed for merging formats)
     try:
         base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -128,6 +139,57 @@ async def download_content(url, custom_opts=None, user_id=None):
         {**ydl_opts, 'format': 'best'},
     ]
 
+    def _find_ffprobe() -> str | None:
+        try:
+            base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+            installs_dir = os.path.join(base_dir, "core", "installs")
+            local_ffprobe = os.path.join(installs_dir, "ffprobe.exe")
+            if os.path.exists(local_ffprobe):
+                return local_ffprobe
+        except Exception:
+            pass
+        return shutil.which("ffprobe")
+
+    def _looks_like_static_video(video_path: str) -> bool:
+        ffprobe = _find_ffprobe()
+        if not ffprobe:
+            return False
+        try:
+            args = [
+                ffprobe,
+                "-v",
+                "error",
+                "-select_streams",
+                "v:0",
+                "-show_entries",
+                "stream=nb_frames,avg_frame_rate,r_frame_rate,codec_name",
+                "-of",
+                "json",
+                video_path,
+            ]
+            completed = subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, check=False)
+            if completed.returncode != 0:
+                return False
+            data = json.loads((completed.stdout or b"{}").decode("utf-8", errors="ignore") or "{}")
+            streams = data.get("streams") or []
+            if not streams:
+                return False
+            stream = streams[0] or {}
+            nb_frames = stream.get("nb_frames")
+            if nb_frames is not None:
+                try:
+                    if int(nb_frames) <= 1:
+                        return True
+                except Exception:
+                    pass
+            # Fallback heuristic: some broken outputs report 0/0 fps.
+            afr = str(stream.get("avg_frame_rate") or "")
+            if afr.strip() in ("0/0", "0"):
+                return True
+        except Exception:
+            return False
+        return False
+
     def _extract_sync(opts: dict):
         with yt_dlp.YoutubeDL(opts) as ydl:
             return ydl.extract_info(url, download=True)
@@ -148,5 +210,35 @@ async def download_content(url, custom_opts=None, user_id=None):
         for root, dirs, filenames in os.walk(save_path):
             for f in filenames:
                 files.append(os.path.join(root, f))
+
+    # Instagram: if the resulting mp4 looks like a still image with audio, retry once with stricter selection.
+    if is_instagram and not error:
+        video_candidates = [f for f in files if f.lower().endswith((".mp4", ".mov", ".mkv", ".webm"))]
+        maybe_video = video_candidates[0] if video_candidates else None
+        if maybe_video and _looks_like_static_video(maybe_video):
+            logger.warning("Instagram download looks static; retrying with stricter format selection")
+            try:
+                # Clean folder and retry
+                for root, _, filenames in os.walk(save_path):
+                    for fn in filenames:
+                        try:
+                            os.remove(os.path.join(root, fn))
+                        except Exception:
+                            pass
+                retry_opts = dict(ydl_opts)
+                retry_opts['format'] = 'bv*[vcodec^=avc1][ext=mp4]+ba[ext=m4a]/bv*+ba/b'
+                retry_opts['merge_output_format'] = 'mp4'
+                retry_opts['remuxvideo'] = 'mp4'
+                info = await asyncio.to_thread(_extract_sync, retry_opts)
+                meta = info
+                error = None
+
+                files = []
+                for root, dirs, filenames in os.walk(save_path):
+                    for f in filenames:
+                        files.append(os.path.join(root, f))
+            except Exception as e:
+                error = str(e)
+                logger.error(f"Instagram retry failed: {error}")
 
     return files, save_path, error, meta

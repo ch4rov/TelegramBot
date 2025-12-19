@@ -53,7 +53,8 @@ class CommonDownloader(ABC):
             system_ffmpeg = shutil.which("ffmpeg")
             if system_ffmpeg:
                 ffmpeg_location = system_ffmpeg
-        else:
+
+        if not ffmpeg_location:
             return None, None, "System Error: FFmpeg missing.", None
 
         if not os.path.exists(self.download_path): 
@@ -108,7 +109,13 @@ class CommonDownloader(ABC):
         else:
             # === STANDARD VIDEO ===
             ydl_opts['writethumbnail'] = True
-            ydl_opts['format'] = 'bestvideo+bestaudio/best'
+            # Instagram can sometimes provide still-image variants; prefer a real H.264 mp4 video when possible.
+            if "instagram.com" in (self.url or ""):
+                ydl_opts['format'] = 'bv*[ext=mp4][vcodec^=avc1]+ba[ext=m4a]/b[ext=mp4]/b'
+                ydl_opts['merge_output_format'] = 'mp4'
+                ydl_opts['remuxvideo'] = 'mp4'
+            else:
+                ydl_opts['format'] = 'bestvideo+bestaudio/best'
             ydl_opts['merge_output_format'] = 'mp4'
             
             ydl_opts['postprocessors'].append({'key': 'FFmpegVideoConvertor', 'preferedformat': 'mp4'})
