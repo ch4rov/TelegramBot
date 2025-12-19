@@ -4,13 +4,16 @@ import asyncio
 import logging
 import uuid
 import subprocess
-from aiogram import Router, types, F
+from aiogram import Router, types, F, Bot
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import FSInputFile, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.enums import ChatAction
+from aiogram.client.session.aiohttp import AiohttpSession
+from aiogram.client.default import DefaultBotProperties
+from aiohttp.client_exceptions import ClientResponseError
 from core.config import config
 from services.database.repo import is_user_banned, increment_request_count
 from services.platforms.TelegramDownloader.workflow import fix_local_path
@@ -30,26 +33,7 @@ def _t(user_lang: str, key: str) -> str:
         )
     if key == "generic_error":
         return "❌ Ошибка обработки видео" if lang == "ru" else "❌ Error processing video"
-    if key == "local_file_404":
-        return (
-            "❌ Локальный Bot API не отдает файл по /file (404).\n\n"
-            "Что сделать:\n"
-            "1) Убедись, что LOCAL_SERVER_URL указывает прямо на Telegram Bot API server (его http-порт), а не на прокси, который проксирует только /bot.\n"
-            "2) Если используешь Nginx/прокси — добавь проксирование пути /file/.\n\n"
-            "Проверка: открой в браузере/через curl URL вида /file/bot<TOKEN>/... (должен скачиваться файл)."
-            if lang == "ru"
-            else
-            "❌ Local Bot API can't serve the file via /file (404).\n\n"
-            "Fix:\n"
-            "1) Make sure LOCAL_SERVER_URL points to the Telegram Bot API server HTTP port (not a proxy that only forwards /bot).\n"
-            "2) If you use Nginx/proxy — also proxy the /file/ path.\n\n"
-            "Check: open a /file/bot<TOKEN>/... URL (it should download)."
-        )
     return ""
-
-
-def _http_status(exc: Exception) -> int | None:
-    return getattr(exc, "status", None)
 
 
 async def _send_action(message: types.Message, action: ChatAction):
@@ -95,6 +79,15 @@ async def _get_video_duration(ffprobe_path: str, video_path: str) -> float | Non
     except Exception:
         pass
     return None
+
+
+async def _download_video_to_path(bot: Bot, file_id: str, destination_path: str) -> None:
+    file = await bot.get_file(file_id)
+    download_path = file.file_path
+    if config.USE_LOCAL_SERVER:
+        # Local Bot API may return an absolute container path; aiogram expects a relative path.
+        download_path = fix_local_path(download_path, bot.token)
+    await bot.download_file(download_path, destination_path)
 
 
 async def _optimize_video_size(
@@ -294,7 +287,6 @@ async def process_video(message: types.Message, user_lang: str = "en"):
             pass
         
         file_id = message.video.file_id
-        file = await message.bot.get_file(file_id)
         
         temp_dir = "tempfiles"
         os.makedirs(temp_dir, exist_ok=True)
@@ -302,23 +294,28 @@ async def process_video(message: types.Message, user_lang: str = "en"):
         input_path = os.path.join(temp_dir, f"vid_in_{uuid.uuid4()}.mp4")
         output_path = os.path.join(temp_dir, f"vid_out_{uuid.uuid4()}.mp4")
         
-        download_path = file.file_path
-        if config.USE_LOCAL_SERVER:
-            # Local Bot API may return an absolute container path; aiogram expects a relative path.
-            download_path = fix_local_path(download_path, message.bot.token)
-
         try:
-            await message.bot.download_file(download_path, input_path)
-        except Exception as e:
-            logger.error(
-                "download_file failed (use_local=%s, file_path=%r, download_path=%r): %s",
-                config.USE_LOCAL_SERVER,
-                file.file_path,
-                download_path,
-                e,
-            )
-            if config.USE_LOCAL_SERVER and _http_status(e) == 404:
-                await message.answer(_t(user_lang, "local_file_404"), disable_notification=True)
+            await _download_video_to_path(message.bot, file_id, input_path)
+        except ClientResponseError as e:
+            # Some Local Bot API deployments are started with --local and don't serve files via /file,
+            # which results in 404s. In that case, fall back to the public Bot API for downloads.
+            if config.USE_LOCAL_SERVER and e.status == 404:
+                logger.warning("Local Bot API /file returned 404; falling back to public Bot API for download")
+                public_bot = Bot(
+                    token=message.bot.token,
+                    session=AiohttpSession(),
+                    default=DefaultBotProperties(parse_mode=None),
+                )
+                try:
+                    await _download_video_to_path(public_bot, file_id, input_path)
+                finally:
+                    try:
+                        await public_bot.session.close()
+                    except Exception:
+                        pass
+            else:
+                raise
+        except Exception:
             raise
 
         # Stage: converting into video note
@@ -371,12 +368,10 @@ async def process_video(message: types.Message, user_lang: str = "en"):
     except Exception as e:
         logger.exception("Error processing video")
         if isinstance(e, TelegramBadRequest) and "file is too big" in str(e).lower():
-            await message.answer(_t(user_lang, "too_big"), disable_notification=True)
-        elif config.USE_LOCAL_SERVER and _http_status(e) == 404:
-            # Already explained above (or here if raised upstream)
-            await message.answer(_t(user_lang, "local_file_404"), disable_notification=True)
+            await message.answer(_t(user_lang, "too_big"), disable_notification=True, parse_mode=None)
         else:
-            await message.answer(_t(user_lang, "generic_error"), disable_notification=True)
+            # Avoid HTML parsing errors from angle brackets in exception texts (bot default parse_mode is HTML).
+            await message.answer(_t(user_lang, "generic_error"), disable_notification=True, parse_mode=None)
         try:
             if status:
                 await status.delete()

@@ -150,6 +150,96 @@ async def download_content(url, custom_opts=None, user_id=None):
             pass
         return shutil.which("ffprobe")
 
+    def _find_ffmpeg() -> str | None:
+        try:
+            base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+            installs_dir = os.path.join(base_dir, "core", "installs")
+            local_ffmpeg = os.path.join(installs_dir, "ffmpeg.exe")
+            if os.path.exists(local_ffmpeg):
+                return local_ffmpeg
+        except Exception:
+            pass
+        return shutil.which("ffmpeg")
+
+    def _probe_video_stream(video_path: str) -> dict:
+        ffprobe = _find_ffprobe()
+        if not ffprobe:
+            return {}
+        try:
+            args = [
+                ffprobe,
+                "-v",
+                "error",
+                "-select_streams",
+                "v:0",
+                "-show_entries",
+                "stream=codec_name,avg_frame_rate,nb_frames",
+                "-of",
+                "json",
+                video_path,
+            ]
+            completed = subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, check=False)
+            if completed.returncode != 0:
+                return {}
+            data = json.loads((completed.stdout or b"{}").decode("utf-8", errors="ignore") or "{}")
+            streams = data.get("streams") or []
+            return (streams[0] or {}) if streams else {}
+        except Exception:
+            return {}
+
+    def _ensure_ios_playable_mp4(video_path: str) -> str:
+        """If mp4 uses AV1/VP9 etc., re-encode to H.264/AAC for iOS clients."""
+        if not video_path or not os.path.exists(video_path):
+            return video_path
+
+        stream = _probe_video_stream(video_path)
+        codec = (stream.get("codec_name") or "").lower().strip()
+
+        # iOS Telegram often fails to decode AV1/VP9; it can look like a static image with audio.
+        if codec in ("av1", "av01", "vp9", "vp09", "vp8"):
+            ffmpeg = _find_ffmpeg()
+            if not ffmpeg:
+                return video_path
+
+            tmp_out = os.path.splitext(video_path)[0] + "_h264.mp4"
+            args = [
+                ffmpeg,
+                "-y",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-i",
+                video_path,
+                "-c:v",
+                "libx264",
+                "-preset",
+                "veryfast",
+                "-crf",
+                "23",
+                "-pix_fmt",
+                "yuv420p",
+                "-c:a",
+                "aac",
+                "-b:a",
+                "128k",
+                "-movflags",
+                "+faststart",
+                tmp_out,
+            ]
+            completed = subprocess.run(args, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, check=False)
+            if completed.returncode == 0 and os.path.exists(tmp_out) and os.path.getsize(tmp_out) > 0:
+                try:
+                    os.replace(tmp_out, video_path)
+                except Exception:
+                    return tmp_out
+            else:
+                try:
+                    if os.path.exists(tmp_out):
+                        os.remove(tmp_out)
+                except Exception:
+                    pass
+        return video_path
+
     def _looks_like_static_video(video_path: str) -> bool:
         ffprobe = _find_ffprobe()
         if not ffprobe:
@@ -240,5 +330,17 @@ async def download_content(url, custom_opts=None, user_id=None):
             except Exception as e:
                 error = str(e)
                 logger.error(f"Instagram retry failed: {error}")
+
+    # Instagram: ensure the resulting mp4 is iOS-playable (avoid AV1/VP9) and has proper MP4 layout.
+    if is_instagram and not error:
+        video_candidates = [f for f in files if f.lower().endswith(".mp4")]
+        for vp in video_candidates[:1]:
+            fixed_path = _ensure_ios_playable_mp4(vp)
+            if fixed_path != vp:
+                # Update list if we had to write to a different file path.
+                try:
+                    files = [fixed_path if f == vp else f for f in files]
+                except Exception:
+                    pass
 
     return files, save_path, error, meta
