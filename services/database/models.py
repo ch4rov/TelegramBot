@@ -104,7 +104,7 @@ class UserOAuthToken(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(BigInteger, index=True)
-    service: Mapped[str] = mapped_column(String(32), index=True)  # spotify|yandex
+    service: Mapped[str] = mapped_column(String(32), index=True)  # spotify
     access_token: Mapped[str] = mapped_column(Text)
     refresh_token: Mapped[str | None] = mapped_column(Text, nullable=True)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
@@ -123,7 +123,7 @@ class OAuthState(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     state: Mapped[str] = mapped_column(String(128), unique=True, index=True)
-    service: Mapped[str] = mapped_column(String(32), index=True)  # spotify|yandex
+    service: Mapped[str] = mapped_column(String(32), index=True)  # spotify
     user_id: Mapped[int] = mapped_column(BigInteger, index=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now())
@@ -131,4 +131,19 @@ class OAuthState(Base):
 
     __table_args__ = (
         Index("ix_oauth_states_service_user", "service", "user_id"),
+    )
+
+
+class UserPreference(Base):
+    __tablename__ = "user_preferences"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    key: Mapped[str] = mapped_column(String(64), index=True)
+    value: Mapped[str] = mapped_column(Text)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "key", name="uq_user_preferences_user_key"),
+        Index("ix_user_preferences_user_key", "user_id", "key"),
     )

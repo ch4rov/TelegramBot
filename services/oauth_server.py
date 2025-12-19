@@ -47,7 +47,6 @@ class OAuthServer:
         app = web.Application()
         app.router.add_get("/health", self._health)
         app.router.add_get("/oauth/spotify/callback", self._spotify_callback)
-        app.router.add_get("/oauth/yandex/callback", self._yandex_callback)
 
         runner = web.AppRunner(app)
         await runner.setup()
@@ -144,69 +143,6 @@ class OAuthServer:
 
         return _html_page("Spotify OAuth", "Connected successfully")
 
-    async def _yandex_callback(self, request: web.Request) -> web.Response:
-        code = (request.query.get("code") or "").strip()
-        state = (request.query.get("state") or "").strip()
-        if not code or not state:
-            return _html_page("Yandex OAuth", "Missing code/state", status=400)
-
-        user_id = await consume_oauth_state(state, "yandex")
-        if not user_id:
-            return _html_page("Yandex OAuth", "State is invalid or expired", status=400)
-
-        if not config.YANDEX_CLIENT_ID or not config.YANDEX_CLIENT_SECRET:
-            return _html_page("Yandex OAuth", "Server is missing YANDEX_CLIENT_ID/SECRET", status=500)
-
-        redirect_uri = self._redirect_uri("yandex")
-        token_url = "https://oauth.yandex.ru/token"
-        data = {
-            "grant_type": "authorization_code",
-            "code": code,
-            "client_id": config.YANDEX_CLIENT_ID,
-            "client_secret": config.YANDEX_CLIENT_SECRET,
-            "redirect_uri": redirect_uri,
-        }
-
-        try:
-            async with ClientSession() as session:
-                async with session.post(token_url, data=data, timeout=20) as resp:
-                    payload = await resp.json(content_type=None)
-                    if resp.status >= 400:
-                        logger.error("Yandex token exchange failed: %s %s", resp.status, payload)
-                        return _html_page("Yandex OAuth", "Token exchange failed", status=500)
-        except Exception:
-            logger.exception("Yandex token exchange exception")
-            return _html_page("Yandex OAuth", "Token exchange exception", status=500)
-
-        access_token = (payload.get("access_token") or "").strip()
-        refresh_token = (payload.get("refresh_token") or None)
-        expires_in = payload.get("expires_in")
-        expires_at = None
-        try:
-            if expires_in is not None:
-                expires_at = datetime.now() + timedelta(seconds=int(expires_in))
-        except Exception:
-            expires_at = None
-
-        if not access_token:
-            return _html_page("Yandex OAuth", "No access_token returned", status=500)
-
-        await upsert_user_oauth_token(
-            user_id=user_id,
-            service="yandex",
-            access_token=access_token,
-            refresh_token=refresh_token,
-            expires_at=expires_at,
-            scope=None,
-        )
-
-        try:
-            await self._bot.send_message(user_id, "✅ Yandex connected", disable_notification=True)
-        except Exception:
-            logger.exception("Failed to notify user about Yandex connect")
-
-        return _html_page("Yandex OAuth", "Connected successfully")
-
 
 def build_spotify_authorize_url(state: str) -> str:
     redirect_uri = f"{config.PUBLIC_BASE_URL}/oauth/spotify/callback"
@@ -219,16 +155,3 @@ def build_spotify_authorize_url(state: str) -> str:
         "show_dialog": "true",
     }
     return "https://accounts.spotify.com/authorize?" + urlencode(params)
-
-
-def build_yandex_authorize_url(state: str) -> str:
-    redirect_uri = f"{config.PUBLIC_BASE_URL}/oauth/yandex/callback"
-    params = {
-        "client_id": config.YANDEX_CLIENT_ID,
-        "response_type": "code",
-        "redirect_uri": redirect_uri,
-        "state": state,
-    }
-    if config.YANDEX_SCOPES:
-        params["scope"] = config.YANDEX_SCOPES
-    return "https://oauth.yandex.ru/authorize?" + urlencode(params)

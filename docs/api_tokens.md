@@ -1,4 +1,4 @@
-# Где создать API токены (Spotify / Yandex)
+# Где создать API токены (Spotify)
 
 Ниже — минимальный список “что где нажать”, чтобы получить `client_id` (и `client_secret` где нужно).
 
@@ -25,26 +25,10 @@
 Если бот запущен в тестовом режиме (`IS_TEST_ENV=True`), бот берёт base URL из `TEST_PUBLIC_BASE_URL`.
 Если в проде (`IS_TEST_ENV=False`) — из `PUBLIC_BASE_URL`.
 
-## Yandex
+## Yandex Music (только ссылки)
 
-1) Создай OAuth приложение:
-- https://oauth.yandex.ru/client/new
-
-2) Тип приложения
-- Обычно выбирают “Веб-сервисы” (чтобы были redirect URI)
-
-3) После создания получишь:
-- **ClientID**
-- **Client secret**
-
-4) Redirect URI
-- Добавь redirect URI (как и у Spotify, должен совпадать 1:1)
-
-Пример:
-- `https://YOUR_PUBLIC_HOST/oauth/yandex/callback`
-
-Если бот запущен в тестовом режиме (`IS_TEST_ENV=True`), бот берёт base URL из `TEST_PUBLIC_BASE_URL`.
-Если в проде (`IS_TEST_ENV=False`) — из `PUBLIC_BASE_URL`.
+OAuth Яндекса в проекте не используется.
+Ссылки Яндекс.Музыки обрабатываются как обычные ссылки: best-effort метаданные + скачивание через Odesli → YouTube/SoundCloud.
 
 ## Важно про публичный callback URL (без отдельного сервера)
 

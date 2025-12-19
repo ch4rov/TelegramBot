@@ -48,7 +48,7 @@ TECH_CHAT_ID=
 LASTFM_API_KEY=
 LASTFM_SECRET=
 
-# === OAuth (Spotify/Yandex) ===
+# === OAuth (Spotify) ===
 # Public base URL of your tunnel, without trailing slash.
 # Example: https://YOUR_PUBLIC_HOST
 PUBLIC_BASE_URL=
@@ -65,13 +65,6 @@ SPOTIFY_CLIENT_SECRET=
 TEST_SPOTIFY_CLIENT_ID=
 TEST_SPOTIFY_CLIENT_SECRET=
 SPOTIFY_SCOPES=user-read-currently-playing user-read-recently-played
-
-# Yandex OAuth (optional)
-YANDEX_CLIENT_ID=
-YANDEX_CLIENT_SECRET=
-TEST_YANDEX_CLIENT_ID=
-TEST_YANDEX_CLIENT_SECRET=
-YANDEX_SCOPES=
 """
     try:
         ENV_PATH.write_text(template, encoding="utf-8")
@@ -143,10 +136,6 @@ class Settings:
         self.SPOTIFY_CLIENT_SECRET = (os.getenv("TEST_SPOTIFY_CLIENT_SECRET" if self.IS_TEST else "SPOTIFY_CLIENT_SECRET", "") or "").strip()
         self.SPOTIFY_SCOPES = (os.getenv("SPOTIFY_SCOPES", "user-read-currently-playing user-read-recently-played") or "").strip()
 
-        # Yandex
-        self.YANDEX_CLIENT_ID = (os.getenv("TEST_YANDEX_CLIENT_ID" if self.IS_TEST else "YANDEX_CLIENT_ID", "") or "").strip()
-        self.YANDEX_CLIENT_SECRET = (os.getenv("TEST_YANDEX_CLIENT_SECRET" if self.IS_TEST else "YANDEX_CLIENT_SECRET", "") or "").strip()
-        self.YANDEX_SCOPES = (os.getenv("YANDEX_SCOPES", "") or "").strip()
         
         # 6. Database
         db_type = os.getenv("DB_TYPE", "sqlite").lower()

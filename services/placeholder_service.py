@@ -11,6 +11,89 @@ from core.config import config
 
 logger = logging.getLogger(__name__)
 
+
+async def upload_temp_audio_placeholder(
+    *,
+    title: str,
+    performer: str | None = None,
+    chat_id: int | None = None,
+) -> tuple[str | None, int | None, int | None]:
+    """Upload a short silent audio with custom metadata and return (file_id, message_id, chat_id).
+
+    This is used to generate temporary cached-audio file_ids for inline presets.
+    Caller is responsible for deleting the returned message_id (best-effort).
+    """
+
+    try:
+        if chat_id is None:
+            chat_id = settings.LOG_CHANNEL_ID
+    except Exception:
+        chat_id = None
+
+    if chat_id is None:
+        try:
+            chat_id = int(settings.TECH_CHAT_ID) if getattr(settings, "TECH_CHAT_ID", None) else None
+        except Exception:
+            chat_id = None
+
+    if chat_id is None:
+        chat_id = config.ADMIN_IDS[0] if getattr(config, "ADMIN_IDS", None) else None
+
+    if not chat_id:
+        return None, None, None
+
+    repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    installs_dir = os.path.join(repo_root, "core", "installs")
+    ffmpeg = os.path.join(installs_dir, "ffmpeg.exe") if os.path.exists(os.path.join(installs_dir, "ffmpeg.exe")) else "ffmpeg"
+
+    ph_dir = os.path.join(settings.TEMP_DIR, "_inline_placeholders")
+    os.makedirs(ph_dir, exist_ok=True)
+    audio_path = os.path.join(ph_dir, "placeholder_audio.mp3")
+
+    if not os.path.exists(audio_path):
+        # Best-effort generate local placeholder file
+        try:
+            completed = await asyncio.to_thread(
+                subprocess.run,
+                [
+                    ffmpeg,
+                    "-y",
+                    "-hide_banner",
+                    "-loglevel",
+                    "error",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "anullsrc=r=44100:cl=stereo",
+                    "-t",
+                    "1",
+                    "-c:a",
+                    "libmp3lame",
+                    "-q:a",
+                    "6",
+                    audio_path,
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+            if completed.returncode != 0:
+                return None, None, None
+        except Exception:
+            return None, None, None
+
+    try:
+        msg = await bot.send_audio(
+            chat_id,
+            FSInputFile(audio_path),
+            title=(title or "").strip() or None,
+            performer=(performer or "").strip() or None,
+            caption=None,
+        )
+        return msg.audio.file_id, msg.message_id, chat_id
+    except Exception:
+        return None, None, None
+
 async def get_placeholder(placeholder_type: str):
     """Get placeholder file_id from database"""
     key = f"placeholder_{placeholder_type}"

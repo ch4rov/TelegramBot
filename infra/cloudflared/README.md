@@ -14,7 +14,6 @@ docker compose -f .\infra\cloudflared\docker-compose.quick.yml up
   - `TEST_PUBLIC_BASE_URL=https://xxxx.trycloudflare.com`
 - Your provider redirect URIs must be:
   - `https://xxxx.trycloudflare.com/oauth/spotify/callback`
-  - `https://xxxx.trycloudflare.com/oauth/yandex/callback`
 
 ## Named tunnel (stable / production)
 
@@ -56,12 +55,17 @@ This requires a Cloudflare account and a Tunnel token.
   - URL: `http://host.docker.internal:8088` (or your chosen port)
   - Save
 
+  If you want **stable PROD + stable TEST** on the same domain (example: `ch4rov.pl`):
+  - `bot.ch4rov.pl` → `http://host.docker.internal:8088` (prod, matches `OAUTH_HTTP_PORT`)
+  - `test-bot.ch4rov.pl` → `http://host.docker.internal:8089` (test, matches `TEST_OAUTH_HTTP_PORT`)
+
 9. **Update your `.env`:**
   - `PUBLIC_BASE_URL=https://bot.yourdomain.com`
+  - (optional) `TEST_PUBLIC_BASE_URL=https://test-bot.yourdomain.com`
 
-10. **Set redirect URIs in Spotify/Yandex apps:**
-   - `https://bot.yourdomain.com/oauth/spotify/callback`
-   - `https://bot.yourdomain.com/oauth/yandex/callback`
+10. **Set redirect URIs in Spotify app:**
+  - `https://bot.yourdomain.com/oauth/spotify/callback`
+  - (optional test) `https://test-bot.yourdomain.com/oauth/spotify/callback`
 
 11. **Restart bot and tunnel if needed.**
 

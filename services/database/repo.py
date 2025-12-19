@@ -3,7 +3,7 @@ from sqlalchemy import delete
 from sqlalchemy.dialects.sqlite import insert
 from datetime import datetime, timedelta
 from services.database.core import session_maker 
-from services.database.models import User, SystemSettings, GlobalCookies, MediaCache, UserRequest, UserOAuthToken, OAuthState
+from services.database.models import User, SystemSettings, GlobalCookies, MediaCache, UserRequest, UserOAuthToken, OAuthState, UserPreference
 
 # === РАБОТА С ПОЛЬЗОВАТЕЛЯМИ ===
 
@@ -159,6 +159,48 @@ async def get_all_users():
     async with session_maker() as session:
         result = await session.execute(select(User))
         return result.scalars().all()
+
+
+# === USER PREFERENCES (per-user key/value) ===
+
+async def get_user_pref(user_id: int, key: str) -> str | None:
+    key = (key or "").strip().lower()
+    if not key:
+        return None
+    async with session_maker() as session:
+        res = await session.execute(select(UserPreference).where(UserPreference.user_id == user_id, UserPreference.key == key))
+        row = res.scalar_one_or_none()
+        return (row.value if row else None)
+
+
+async def set_user_pref(user_id: int, key: str, value: str) -> None:
+    key = (key or "").strip().lower()
+    if not key:
+        return
+    async with session_maker() as session:
+        async with session.begin():
+            stmt = insert(UserPreference).values(user_id=user_id, key=key, value=str(value))
+            stmt = stmt.on_conflict_do_update(
+                index_elements=[UserPreference.user_id, UserPreference.key],
+                set_={"value": str(value), "updated_at": datetime.now()},
+            )
+            await session.execute(stmt)
+
+
+async def get_user_pref_bool(user_id: int, key: str, default: bool = False) -> bool:
+    raw = await get_user_pref(user_id, key)
+    if raw is None:
+        return bool(default)
+    raw = str(raw).strip().lower()
+    if raw in ("1", "true", "yes", "on", "y"):
+        return True
+    if raw in ("0", "false", "no", "off", "n"):
+        return False
+    return bool(default)
+
+
+async def set_user_pref_bool(user_id: int, key: str, value: bool) -> None:
+    await set_user_pref(user_id, key, "1" if bool(value) else "0")
 
 
 # === OAUTH TOKENS (per-user) ===

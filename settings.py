@@ -25,7 +25,7 @@ LASTFM_SECRET = os.getenv("LASTFM_SECRET")
 USE_LOCAL_SERVER = os.getenv("USE_LOCAL_SERVER", "False").lower() == "true"
 LOCAL_SERVER_URL = os.getenv("LOCAL_SERVER_URL", "http://127.0.0.1:8081")
 
-# === OAuth (Spotify/Yandex) ===
+# === OAuth (Spotify) ===
 PUBLIC_BASE_URL = (os.getenv("TEST_PUBLIC_BASE_URL") if IS_TEST_ENV else os.getenv("PUBLIC_BASE_URL")) or ""
 PUBLIC_BASE_URL = PUBLIC_BASE_URL.strip().rstrip("/")
 
@@ -38,10 +38,6 @@ except Exception:
 SPOTIFY_CLIENT_ID = (os.getenv("TEST_SPOTIFY_CLIENT_ID") if IS_TEST_ENV else os.getenv("SPOTIFY_CLIENT_ID")) or ""
 SPOTIFY_CLIENT_SECRET = (os.getenv("TEST_SPOTIFY_CLIENT_SECRET") if IS_TEST_ENV else os.getenv("SPOTIFY_CLIENT_SECRET")) or ""
 SPOTIFY_SCOPES = (os.getenv("SPOTIFY_SCOPES") or "user-read-currently-playing user-read-recently-played").strip()
-
-YANDEX_CLIENT_ID = (os.getenv("TEST_YANDEX_CLIENT_ID") if IS_TEST_ENV else os.getenv("YANDEX_CLIENT_ID")) or ""
-YANDEX_CLIENT_SECRET = (os.getenv("TEST_YANDEX_CLIENT_SECRET") if IS_TEST_ENV else os.getenv("YANDEX_CLIENT_SECRET")) or ""
-YANDEX_SCOPES = (os.getenv("YANDEX_SCOPES") or "").strip()
 
 TEMP_DIR = "tempfiles"
 
@@ -78,6 +74,7 @@ BOT_COMMANDS_LIST = [
     ("start", "Main Menu", "Главное меню", "user", False),
     ("language", "Toggle Language", "Переключить язык", "user", True),
     ("login", "Last.fm Connect", "Подключить Last.fm", "user", False),
+    ("api", "API Status", "API статус", "user", False),
     ("videomessage", "Video Note Mode", "Режим видеозаписи", "user", True),
     ("addcookies", "Add Cookies", "Добавить куки", "user", False),
     

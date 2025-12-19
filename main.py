@@ -94,10 +94,10 @@ async def main():
     # OAuth callback server (aiohttp) for Spotify/Yandex
     oauth_server = OAuthServer(bot)
 
-    async def _oauth_startup(_: Bot):
+    async def _oauth_startup(*args, **kwargs):
         await oauth_server.start()
 
-    async def _oauth_shutdown(_: Bot):
+    async def _oauth_shutdown(*args, **kwargs):
         await oauth_server.stop()
 
     dp.startup.register(_oauth_startup)

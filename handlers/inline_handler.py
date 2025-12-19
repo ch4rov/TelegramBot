@@ -29,9 +29,12 @@ from services.database.repo import (
     get_cached_media,
     upsert_cached_media,
     log_user_request,
+    get_user_pref_bool,
 )
 from services.lastfm_service import get_user_recent_track
 from services.search_service import search_music
+from services.odesli_service import get_links_by_url
+from services.inline_presets import get_inline_preset, get_inline_preset_item
 
 router = Router()
 
@@ -74,6 +77,47 @@ def _is_music_like_url(url: str) -> bool:
         or "soundcloud.com" in u
     )
 
+
+def _platform_label(url: str) -> str:
+    u = (url or "").lower()
+    if "open.spotify.com" in u:
+        return "Spotify"
+    if "music.yandex" in u:
+        return "Yandex Music"
+    if "music.apple.com" in u or "itunes.apple.com" in u:
+        return "Apple Music"
+    if "soundcloud.com" in u:
+        return "SoundCloud"
+    if "music.youtube.com" in u:
+        return "YouTube Music"
+    if "youtu" in u:
+        return "YouTube"
+    return "Link"
+
+
+async def _build_inline_audio_caption(user_id: int, source_url: str) -> tuple[str | None, str | None]:
+    """Return (caption, parse_mode). When links are disabled, caption is None."""
+    try:
+        enabled = await get_user_pref_bool(user_id, "links", default=True)
+    except Exception:
+        enabled = False
+
+    if not enabled:
+        return None, None
+
+    platform = _platform_label(source_url)
+    page_url = None
+    try:
+        info = await get_links_by_url(source_url)
+        if isinstance(info, dict):
+            page_url = info.get("page")
+    except Exception:
+        page_url = None
+
+    if page_url:
+        return f"{platform} | <a href=\"{html.escape(page_url)}\">Other (song.link)</a>", "HTML"
+    return f"{platform} | Other (song.link)", None
+
 @router.inline_query()
 async def inline_query_handler(query: types.InlineQuery):
     text = query.query.strip()
@@ -95,7 +139,9 @@ async def inline_query_handler(query: types.InlineQuery):
     if not audio_ph:
         audio_ph = await get_placeholder('audio')
     
-    if not video_ph or not audio_ph:
+    # Inline-video and inline-audio both rely on placeholders.
+    # If video placeholder is missing, we still allow audio-only mode.
+    if not audio_ph:
         results.append(InlineQueryResultArticle(
             id="inline_not_ready",
             title="⚠️ Inline is not ready",
@@ -110,26 +156,65 @@ async def inline_query_handler(query: types.InlineQuery):
             pass
         return
 
-    # 1. Режим скачивания по ссылке
-    if text and is_valid_url(text):
-        # Show both: Send as video / Send as audio (if enabled)
+    # 0. Presets (/now, /recent)
+    if text.lower().startswith("sp:"):
+        token = text.split(":", 1)[1].strip()
+        items = get_inline_preset(user_id, token)
         keyboard = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⏳", callback_data="processing")]])
 
-        if await get_module_status("InlineVideo"):
+        if items:
+            for idx, it in enumerate(items[:3]):
+                file_id = (it or {}).get("file_id") if isinstance(it, dict) else None
+                if not file_id:
+                    continue
+                results.append(
+                    InlineQueryResultCachedAudio(
+                        id=f"preset:{token}:{idx}",
+                        audio_file_id=file_id,
+                        caption="⏳",
+                        reply_markup=keyboard,
+                    )
+                )
+
+        if not results:
+            results.append(
+                InlineQueryResultArticle(
+                    id="preset_expired",
+                    title=("⏱ Истекло" if is_ru else "⏱ Expired"),
+                    description=("Повтори /now или /recent" if is_ru else "Run /now or /recent again"),
+                    input_message_content=InputTextMessageContent(
+                        message_text=("Повтори /now или /recent" if is_ru else "Run /now or /recent again")
+                    ),
+                )
+            )
+
+        try:
+            await query.answer(results, cache_time=1, is_personal=True)
+        except Exception:
+            pass
+        return
+
+    # 1. Режим скачивания по ссылке
+    if text and is_valid_url(text):
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⏳", callback_data="processing")]])
+
+        # Inline-video: only in link mode, only for allowed links, only if module enabled.
+        if video_ph and await get_module_status("InlineVideo"):
             qid = str(uuid.uuid4())
             INLINE_LINK_MODE_CACHE[qid] = "video"
-            title = "Отправить видео" if is_ru else "Send as video"
-            results.append(InlineQueryResultCachedVideo(
-                id=f"link:video:{qid}",
-                video_file_id=video_ph,
-                title=title,
-                description=text,
-                caption="⏳",
-                parse_mode="HTML",
-                reply_markup=keyboard,
-            ))
+            title = "Скачать видео" if is_ru else "Download a video.."
+            results.append(
+                InlineQueryResultCachedVideo(
+                    id=f"link:video:{qid}",
+                    video_file_id=video_ph,
+                    title=title,
+                    description=text,
+                    caption="⏳",
+                    parse_mode="HTML",
+                    reply_markup=keyboard,
+                )
+            )
 
-        # For plain video links we do NOT show audio placeholder.
         # Audio option is shown only for music-like links.
         if _is_music_like_url(text) and await get_module_status("InlineAudio"):
             qid = str(uuid.uuid4())
@@ -143,12 +228,14 @@ async def inline_query_handler(query: types.InlineQuery):
             ))
 
         if not results:
-            results.append(InlineQueryResultArticle(
-                id="inline_disabled",
-                title="⚠️ Inline disabled",
-                description="Inline modules are disabled",
-                input_message_content=InputTextMessageContent(message_text="Inline modules are disabled")
-            ))
+            results.append(
+                InlineQueryResultArticle(
+                    id="inline_disabled",
+                    title="⚠️ Inline disabled",
+                    description="Inline modules are disabled",
+                    input_message_content=InputTextMessageContent(message_text="Inline modules are disabled"),
+                )
+            )
 
     # 2. Режим поиска музыки (или Last.fm)
     else:
@@ -230,10 +317,20 @@ async def chosen_handler(chosen_result: types.ChosenInlineResult):
     is_music_mode = result_id.startswith("music:")
     is_link_audio = result_id.startswith("link:audio:")
     is_link_video = result_id.startswith("link:video:")
+    is_preset = result_id.startswith("preset:")
     url = None
     
     # === ПОЛУЧЕНИЕ ССЫЛКИ ===
-    if is_music_mode:
+    if is_preset:
+        try:
+            _, token, idx = result_id.split(":", 2)
+            it = get_inline_preset_item(user.id, token, int(idx))
+            url = (it or {}).get("url") if isinstance(it, dict) else None
+            is_link_audio = True
+        except Exception:
+            url = None
+
+    elif is_music_mode:
         try:
             query_uuid = result_id.split(":", 1)[1]
             query_text = INLINE_SEARCH_CACHE.get(query_uuid) or chosen_result.query or "Unknown"
@@ -268,11 +365,13 @@ async def chosen_handler(chosen_result: types.ChosenInlineResult):
         try:
             title = (cached.title or "Media").strip()
             caption_text = f'<a href="{url}">{html.escape(title)}</a>'
-            if desired_cache_type == "audio" and is_music_mode:
-                caption_text += f" | <a href=\"https://song.link/{url}\">Links</a>"
+            caption_mode = "HTML"
 
             if desired_cache_type == "audio":
-                new_media = InputMediaAudio(media=cached.file_id, caption=caption_text, parse_mode="HTML")
+                caption_text, caption_mode = await _build_inline_audio_caption(user.id, url)
+
+            if desired_cache_type == "audio":
+                new_media = InputMediaAudio(media=cached.file_id, caption=caption_text or "", parse_mode=caption_mode)
             else:
                 new_media = InputMediaVideo(media=cached.file_id, caption=caption_text, parse_mode="HTML", supports_streaming=True)
 
@@ -382,8 +481,10 @@ async def chosen_handler(chosen_result: types.ChosenInlineResult):
         meta_artist = meta.get('artist') or meta.get('uploader')
         
         caption_text = f'<a href="{url}">{html.escape(meta_title)}</a>'
-        if is_music_mode: 
-            caption_text += f" | <a href=\"https://song.link/{url}\">Links</a>"
+        caption_mode = "HTML"
+
+        if media_type == 'audio':
+            caption_text, caption_mode = await _build_inline_audio_caption(user.id, url)
 
         # === ОТПРАВКА В ЛС (для получения file_id) ===
         # Inline-режим требует file_id уже загруженного на сервера Telegram файла
@@ -396,7 +497,7 @@ async def chosen_handler(chosen_result: types.ChosenInlineResult):
             thumb = FSInputFile(thumb_file) if thumb_file else None
             performer = meta_artist or "@bot"
             sent_msg = await bot.send_audio(
-                user.id, media_obj, caption=caption_text, parse_mode="HTML",
+                user.id, media_obj, caption=caption_text or "", parse_mode=caption_mode,
                 thumbnail=thumb, performer=performer, title=meta_title,
                 reply_markup=get_clip_keyboard(url)
             )
@@ -419,7 +520,7 @@ async def chosen_handler(chosen_result: types.ChosenInlineResult):
         if telegram_file_id:
             new_media = None
             if media_type == 'audio': 
-                new_media = InputMediaAudio(media=telegram_file_id, caption=caption_text, parse_mode="HTML")
+                new_media = InputMediaAudio(media=telegram_file_id, caption=caption_text or "", parse_mode=caption_mode)
             elif media_type == 'video': 
                 new_media = InputMediaVideo(media=telegram_file_id, caption=caption_text, parse_mode="HTML", supports_streaming=True)
             
