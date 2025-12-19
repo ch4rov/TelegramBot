@@ -3,7 +3,7 @@ from sqlalchemy import delete
 from sqlalchemy.dialects.sqlite import insert
 from datetime import datetime, timedelta
 from services.database.core import session_maker 
-from services.database.models import User, SystemSettings, GlobalCookies
+from services.database.models import User, SystemSettings, GlobalCookies, MediaCache, UserRequest, UserOAuthToken, OAuthState
 
 # === РАБОТА С ПОЛЬЗОВАТЕЛЯМИ ===
 
@@ -159,6 +159,242 @@ async def get_all_users():
     async with session_maker() as session:
         result = await session.execute(select(User))
         return result.scalars().all()
+
+
+# === OAUTH TOKENS (per-user) ===
+
+async def create_oauth_state(user_id: int, service: str, ttl_minutes: int = 10) -> str:
+    """Create a short-lived one-time OAuth state string bound to user_id+service."""
+    import secrets
+
+    service = (service or "").strip().lower()
+    if not service:
+        raise ValueError("service is required")
+
+    state = secrets.token_urlsafe(32)
+    now = datetime.now()
+    expires_at = now + timedelta(minutes=max(1, int(ttl_minutes)))
+
+    async with session_maker() as session:
+        async with session.begin():
+            # Best-effort cleanup
+            try:
+                await session.execute(delete(OAuthState).where(OAuthState.expires_at < now))
+            except Exception:
+                pass
+
+            session.add(
+                OAuthState(
+                    state=state,
+                    service=service,
+                    user_id=user_id,
+                    created_at=now,
+                    expires_at=expires_at,
+                )
+            )
+    return state
+
+
+async def consume_oauth_state(state: str, service: str) -> int | None:
+    """Consume state once and return user_id if valid (else None)."""
+    service = (service or "").strip().lower()
+    state = (state or "").strip()
+    if not service or not state:
+        return None
+
+    now = datetime.now()
+    async with session_maker() as session:
+        async with session.begin():
+            res = await session.execute(
+                select(OAuthState).where(OAuthState.state == state, OAuthState.service == service)
+            )
+            row = res.scalar_one_or_none()
+            if not row:
+                return None
+            if row.expires_at and row.expires_at < now:
+                await session.execute(delete(OAuthState).where(OAuthState.id == row.id))
+                return None
+            user_id = int(row.user_id)
+            await session.execute(delete(OAuthState).where(OAuthState.id == row.id))
+            return user_id
+
+async def get_user_oauth_token(user_id: int, service: str) -> UserOAuthToken | None:
+    service = (service or "").strip().lower()
+    if not service:
+        return None
+    async with session_maker() as session:
+        res = await session.execute(
+            select(UserOAuthToken).where(UserOAuthToken.user_id == user_id, UserOAuthToken.service == service)
+        )
+        return res.scalar_one_or_none()
+
+
+async def upsert_user_oauth_token(
+    user_id: int,
+    service: str,
+    access_token: str,
+    refresh_token: str | None = None,
+    expires_at: datetime | None = None,
+    scope: str | None = None,
+) -> UserOAuthToken:
+    service = (service or "").strip().lower()
+    async with session_maker() as session:
+        async with session.begin():
+            now = datetime.now()
+            stmt = insert(UserOAuthToken).values(
+                user_id=user_id,
+                service=service,
+                access_token=access_token,
+                refresh_token=refresh_token,
+                expires_at=expires_at,
+                scope=scope,
+                created_at=now,
+                updated_at=now,
+            )
+            stmt = stmt.on_conflict_do_update(
+                index_elements=[UserOAuthToken.user_id, UserOAuthToken.service],
+                set_={
+                    "access_token": access_token,
+                    "refresh_token": refresh_token,
+                    "expires_at": expires_at,
+                    "scope": scope,
+                    "updated_at": now,
+                },
+            )
+            await session.execute(stmt)
+            res = await session.execute(
+                select(UserOAuthToken).where(UserOAuthToken.user_id == user_id, UserOAuthToken.service == service)
+            )
+            return res.scalar_one()
+
+
+async def delete_user_oauth_token(user_id: int, service: str) -> bool:
+    service = (service or "").strip().lower()
+    async with session_maker() as session:
+        async with session.begin():
+            res = await session.execute(
+                delete(UserOAuthToken).where(UserOAuthToken.user_id == user_id, UserOAuthToken.service == service)
+            )
+            try:
+                return res.rowcount > 0
+            except Exception:
+                return True
+
+
+# === MEDIA CACHE (per-user) ===
+
+async def get_cached_media(user_id: int, url: str, media_type: str) -> MediaCache | None:
+    """Return cached media for this user+url+type (never cross-user)."""
+    if not url:
+        return None
+    async with session_maker() as session:
+        res = await session.execute(
+            select(MediaCache).where(
+                MediaCache.user_id == user_id,
+                MediaCache.url == url,
+                MediaCache.media_type == media_type,
+            )
+        )
+        return res.scalar_one_or_none()
+
+
+async def upsert_cached_media(
+    user_id: int,
+    url: str,
+    file_id: str,
+    media_type: str,
+    title: str | None = None,
+) -> MediaCache:
+    """Insert/update cache row. Cache is strictly user-scoped."""
+    async with session_maker() as session:
+        async with session.begin():
+            now = datetime.now()
+            stmt = insert(MediaCache).values(
+                user_id=user_id,
+                url=url,
+                file_id=file_id,
+                media_type=media_type,
+                title=title,
+                created_at=now,
+                last_used_at=now,
+            )
+            stmt = stmt.on_conflict_do_update(
+                index_elements=[MediaCache.user_id, MediaCache.url, MediaCache.media_type],
+                set_={
+                    "file_id": file_id,
+                    "media_type": media_type,
+                    "title": title,
+                    "last_used_at": now,
+                },
+            )
+            await session.execute(stmt)
+
+            res = await session.execute(
+                select(MediaCache).where(
+                    MediaCache.user_id == user_id,
+                    MediaCache.url == url,
+                    MediaCache.media_type == media_type,
+                )
+            )
+            return res.scalar_one()
+
+
+async def get_cached_media_by_id(cache_id: int) -> MediaCache | None:
+    async with session_maker() as session:
+        res = await session.execute(select(MediaCache).where(MediaCache.id == cache_id))
+        return res.scalar_one_or_none()
+
+
+# === USER REQUEST HISTORY ===
+
+async def log_user_request(
+    user_id: int,
+    kind: str = "message",
+    input_text: str | None = None,
+    url: str | None = None,
+    media_type: str | None = None,
+    title: str | None = None,
+    cache_hit: bool = False,
+    cache_id: int | None = None,
+) -> None:
+    async with session_maker() as session:
+        async with session.begin():
+            session.add(
+                UserRequest(
+                    user_id=user_id,
+                    kind=kind,
+                    input_text=input_text,
+                    url=url,
+                    media_type=media_type,
+                    title=title,
+                    cache_hit=cache_hit,
+                    cache_id=cache_id,
+                )
+            )
+
+
+async def get_user_requests(user_id: int, limit: int = 10, offset: int = 0) -> list[UserRequest]:
+    async with session_maker() as session:
+        res = await session.execute(
+            select(UserRequest)
+            .where(UserRequest.user_id == user_id)
+            .order_by(UserRequest.created_at.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        return list(res.scalars().all())
+
+
+async def count_user_requests(user_id: int) -> int:
+    async with session_maker() as session:
+        res = await session.execute(select(func.count()).select_from(UserRequest).where(UserRequest.user_id == user_id))
+        return int(res.scalar() or 0)
+
+
+async def get_user_request_by_id(req_id: int) -> UserRequest | None:
+    async with session_maker() as session:
+        res = await session.execute(select(UserRequest).where(UserRequest.id == req_id))
+        return res.scalar_one_or_none()
 
 async def increment_request_count(user_id: int):
     """Увеличивает счетчик запросов пользователя."""

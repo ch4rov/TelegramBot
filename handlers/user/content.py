@@ -11,7 +11,8 @@ from aiogram.enums import ChatAction
 from aiogram.exceptions import TelegramRetryAfter
 
 from .router import user_router, check_access_and_update
-from services.database.core import get_cached_file, save_cached_file, get_user_cookie, get_module_status
+from services.database.core import get_user_cookie, get_module_status
+from services.database.repo import get_cached_media, upsert_cached_media, log_user_request
 from core.logger_system import logger
 from services.platforms.platform_manager import download_content, is_valid_url
 from services.platforms.SpotifyDownloader.spotify_strategy import SpotifyStrategy
@@ -191,23 +192,76 @@ async def handle_link(message: types.Message):
         await show_spotify_playlist_ui(message, url, smart_send, user.id)
         return
 
-    db_cache = await get_cached_file(url)
-    if db_cache:
+    # Per-user cache hit
+    is_tiktok_photo = ("tiktok" in url) and ("/photo/" in url)
+    is_music_hint = "music.youtube.com" in url or "http://googleusercontent.com/spotify.com" in url or "soundcloud.com" in url
+    cache_types = ["tiktok_slides"] if is_tiktok_photo else (["audio"] if is_music_hint else ["video", "audio", "photo"])
+    cached = None
+    for mt in cache_types:
         try:
-            is_audio_cache = db_cache['media_type'] == 'audio'
-            caption = make_caption(db_cache['title'], url, caption_override, is_audio=is_audio_cache)
+            cached = await get_cached_media(user.id, url, mt)
+        except Exception:
+            cached = None
+        if cached:
+            break
+    if cached:
+        try:
+            is_audio_cache = cached.media_type == 'audio'
+            caption = make_caption(cached.title, url, caption_override, is_audio=is_audio_cache)
             reply_markup = None
-            if is_audio_cache: reply_markup = get_clip_keyboard(url)
-            
-            if db_cache['media_type'] == 'video': 
-                await smart_send(message.bot.send_video, caption_base=caption, video=db_cache['file_id'], parse_mode="HTML")
-            elif db_cache['media_type'] == 'audio': 
-                await smart_send(message.bot.send_audio, caption_base=caption, audio=db_cache['file_id'], parse_mode="HTML", reply_markup=reply_markup)
-            elif db_cache['media_type'] == 'photo': 
-                await smart_send(message.bot.send_photo, caption_base=caption, photo=db_cache['file_id'], parse_mode="HTML")
+            if is_audio_cache:
+                reply_markup = get_clip_keyboard(url)
+
+            if cached.media_type == 'video':
+                await smart_send(message.bot.send_video, caption_base=caption, video=cached.file_id, parse_mode="HTML")
+            elif cached.media_type == 'audio':
+                await smart_send(message.bot.send_audio, caption_base=caption, audio=cached.file_id, parse_mode="HTML", reply_markup=reply_markup)
+            elif cached.media_type == 'photo':
+                await smart_send(message.bot.send_photo, caption_base=caption, photo=cached.file_id, parse_mode="HTML")
+            elif cached.media_type == 'tiktok_slides':
+                payload = {}
+                try:
+                    payload = json.loads(cached.file_id or "{}")
+                except Exception:
+                    payload = {}
+                photos = payload.get("photos") or []
+                audio_id = payload.get("audio")
+                if photos:
+                    for chunk_start in range(0, len(photos), 10):
+                        chunk = photos[chunk_start:chunk_start + 10]
+                        media_group = []
+                        for i, fid in enumerate(chunk):
+                            cap = caption if (chunk_start == 0 and i == 0) else None
+                            media_group.append(InputMediaPhoto(media=fid, caption=cap, parse_mode="HTML"))
+                        try:
+                            await safe_api_call(message.reply_media_group, media=media_group)
+                        except Exception:
+                            await safe_api_call(message.answer_media_group, media=media_group)
+                if audio_id:
+                    try:
+                        bot_name = settings.BOT_USERNAME or "bot"
+                        await smart_send(message.bot.send_audio, caption="🎵 Sound", audio=audio_id, performer=f"@{bot_name}")
+                    except Exception:
+                        pass
+
+            try:
+                await log_user_request(
+                    user.id,
+                    kind="message_url",
+                    input_text=message.text or "",
+                    url=url,
+                    media_type=cached.media_type,
+                    title=cached.title,
+                    cache_hit=True,
+                    cache_id=cached.id,
+                )
+            except Exception:
+                pass
+
             await logger(user, "CACHE_HIT", url)
             return
-        except: pass
+        except Exception:
+            pass
 
     status_msg = None
     now = time.time()
@@ -297,7 +351,7 @@ async def handle_link(message: types.Message):
     if not target_file:
         target_file = next((f for f in files if f.endswith(tuple(image_exts))), None)
         if target_file: 
-            is_tiktok_photo = "tiktok" in url and len([f for f in files if f.endswith(tuple(image_exts))]) > 1
+              is_tiktok_photo = ("tiktok" in url) and ("/photo/" in url) and len([f for f in files if f.endswith(tuple(image_exts))]) > 1
             if is_tiktok_photo:
                  media_type = 'tiktok_slides'
             elif not is_music_url and "youtube" not in url: 
@@ -334,18 +388,56 @@ async def handle_link(message: types.Message):
              if not await get_module_status("TikTokPhotos"):
                  await smart_send(message.bot.send_message, text=await t(user.id, 'module_disabled'))
                  return
-             media_group = []
-             images = [f for f in files if f.endswith(tuple(image_exts))][:10]
-             for i, img in enumerate(images):
-                 cap = caption if i == 0 else None
-                 media_group.append(InputMediaPhoto(media=FSInputFile(img), caption=cap, parse_mode="HTML"))
-             try: await safe_api_call(message.reply_media_group, media=media_group)
-             except: await safe_api_call(message.answer_media_group, media=media_group)
+             images = [f for f in files if f.endswith(tuple(image_exts))]
+             sent_photo_ids = []
+             for chunk_start in range(0, len(images), 10):
+                 chunk = images[chunk_start:chunk_start + 10]
+                 media_group = []
+                 for i, img in enumerate(chunk):
+                     cap = caption if (chunk_start == 0 and i == 0) else None
+                     media_group.append(InputMediaPhoto(media=FSInputFile(img), caption=cap, parse_mode="HTML"))
+                 try:
+                     msgs = await safe_api_call(message.reply_media_group, media=media_group)
+                 except Exception:
+                     msgs = await safe_api_call(message.answer_media_group, media=media_group)
+                 try:
+                     if msgs:
+                         for m in msgs:
+                             if getattr(m, "photo", None):
+                                 sent_photo_ids.append(m.photo[-1].file_id)
+                 except Exception:
+                     pass
+
+             audio_id = None
              audio_f = next((f for f in files if f.endswith(tuple(audio_exts))), None)
              if audio_f:
                  bot_name = settings.BOT_USERNAME or "bot"
-                 await smart_send(message.bot.send_audio, caption="🎵 Sound", audio=FSInputFile(audio_f), performer=f"@{bot_name}")
-             if status_msg: await safe_api_call(status_msg.delete)
+                 audio_msg = await smart_send(message.bot.send_audio, caption="🎵 Sound", audio=FSInputFile(audio_f), performer=f"@{bot_name}")
+                 try:
+                     if audio_msg and getattr(audio_msg, "audio", None):
+                         audio_id = audio_msg.audio.file_id
+                 except Exception:
+                     audio_id = None
+
+             # Cache payload for /photo/
+             try:
+                 payload = json.dumps({"photos": sent_photo_ids, "audio": audio_id}, ensure_ascii=False)
+                 cache = await upsert_cached_media(user.id, url, payload, "tiktok_slides", title=final_header)
+                 await log_user_request(
+                     user.id,
+                     kind="message_url",
+                     input_text=message.text or "",
+                     url=url,
+                     media_type="tiktok_slides",
+                     title=final_header,
+                     cache_hit=False,
+                     cache_id=cache.id,
+                 )
+             except Exception:
+                 pass
+
+             if status_msg:
+                 await safe_api_call(status_msg.delete)
              return
 
         elif media_type == 'audio':
@@ -382,8 +474,22 @@ async def handle_link(message: types.Message):
              if media_type == "video": fid = sent_msg.video.file_id
              elif media_type == "audio": fid = sent_msg.audio.file_id
              elif media_type == "photo": fid = sent_msg.photo[-1].file_id
-             
-             if fid: await save_cached_file(url, fid, media_type, title=final_header)
+
+             try:
+                 if fid:
+                     cache = await upsert_cached_media(user.id, url, fid, media_type, title=final_header)
+                     await log_user_request(
+                         user.id,
+                         kind="message_url",
+                         input_text=message.text or "",
+                         url=url,
+                         media_type=media_type,
+                         title=final_header,
+                         cache_hit=False,
+                         cache_id=cache.id,
+                     )
+             except Exception:
+                 pass
              
         if status_msg: await safe_api_call(status_msg.delete)
 

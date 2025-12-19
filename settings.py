@@ -25,6 +25,24 @@ LASTFM_SECRET = os.getenv("LASTFM_SECRET")
 USE_LOCAL_SERVER = os.getenv("USE_LOCAL_SERVER", "False").lower() == "true"
 LOCAL_SERVER_URL = os.getenv("LOCAL_SERVER_URL", "http://127.0.0.1:8081")
 
+# === OAuth (Spotify/Yandex) ===
+PUBLIC_BASE_URL = (os.getenv("TEST_PUBLIC_BASE_URL") if IS_TEST_ENV else os.getenv("PUBLIC_BASE_URL")) or ""
+PUBLIC_BASE_URL = PUBLIC_BASE_URL.strip().rstrip("/")
+
+OAUTH_HTTP_HOST = (os.getenv("OAUTH_HTTP_HOST") or "127.0.0.1").strip() or "127.0.0.1"
+try:
+    OAUTH_HTTP_PORT = int((os.getenv("TEST_OAUTH_HTTP_PORT") if IS_TEST_ENV else os.getenv("OAUTH_HTTP_PORT")) or ("8089" if IS_TEST_ENV else "8088"))
+except Exception:
+    OAUTH_HTTP_PORT = 8089 if IS_TEST_ENV else 8088
+
+SPOTIFY_CLIENT_ID = (os.getenv("TEST_SPOTIFY_CLIENT_ID") if IS_TEST_ENV else os.getenv("SPOTIFY_CLIENT_ID")) or ""
+SPOTIFY_CLIENT_SECRET = (os.getenv("TEST_SPOTIFY_CLIENT_SECRET") if IS_TEST_ENV else os.getenv("SPOTIFY_CLIENT_SECRET")) or ""
+SPOTIFY_SCOPES = (os.getenv("SPOTIFY_SCOPES") or "user-read-currently-playing user-read-recently-played").strip()
+
+YANDEX_CLIENT_ID = (os.getenv("TEST_YANDEX_CLIENT_ID") if IS_TEST_ENV else os.getenv("YANDEX_CLIENT_ID")) or ""
+YANDEX_CLIENT_SECRET = (os.getenv("TEST_YANDEX_CLIENT_SECRET") if IS_TEST_ENV else os.getenv("YANDEX_CLIENT_SECRET")) or ""
+YANDEX_SCOPES = (os.getenv("YANDEX_SCOPES") or "").strip()
+
 TEMP_DIR = "tempfiles"
 
 ENABLE_DISCORD_BOT_LOG = os.getenv("ENABLE_DISCORD_BOT_LOG", "False").lower() == "true"

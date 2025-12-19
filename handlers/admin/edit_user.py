@@ -15,6 +15,9 @@ from services.database.repo import (
     ban_user,
     unban_user,
     delete_user,
+    get_user_requests,
+    count_user_requests,
+    get_cached_media_by_id,
 )
 
 logger = logging.getLogger(__name__)
@@ -58,6 +61,10 @@ def _kb_for_entity(entity_id: int, exists: bool, is_banned: bool) -> InlineKeybo
 
         rows.append([
             InlineKeyboardButton(text="🗑️ Удалить данные", callback_data=f"eu:del1:{entity_id}"),
+        ])
+
+        rows.append([
+            InlineKeyboardButton(text="📜 История", callback_data=f"eu:hist:{entity_id}:0"),
         ])
     else:
         rows.append([
@@ -125,8 +132,87 @@ def _render_card(entity_id: int, db_user, api_chat: types.Chat | None, api_error
     lines.append(f"<b>Interactions:</b> {db_user.request_count}")
     lines.append(f"<b>Last.fm:</b> {escape(db_user.lastfm_username or '—')}")
 
-    lines.append("\n<i>Note: message history (first/last message text) is not stored in current DB schema.</i>")
+    lines.append("\n<i>Note: message text history is not stored. Use '📜 История' for request history.</i>")
     return "\n".join(lines)
+
+
+def _kb_history(
+    entity_id: int,
+    page: int,
+    total: int,
+    page_size: int,
+    send_rows: list[list[InlineKeyboardButton]] | None = None,
+) -> InlineKeyboardMarkup:
+    max_page = max(0, (total - 1) // page_size)
+    page = max(0, min(page, max_page))
+    prev_page = max(0, page - 1)
+    next_page = min(max_page, page + 1)
+
+    nav = [
+        InlineKeyboardButton(text="⬅️", callback_data=f"eu:hist:{entity_id}:{prev_page}"),
+        InlineKeyboardButton(text=f"{page + 1}/{max_page + 1}", callback_data=f"eu:hist:{entity_id}:{page}"),
+        InlineKeyboardButton(text="➡️", callback_data=f"eu:hist:{entity_id}:{next_page}"),
+    ]
+    rows: list[list[InlineKeyboardButton]] = []
+    if send_rows:
+        rows.extend(send_rows)
+    rows.append(nav)
+    rows.append([InlineKeyboardButton(text="🔙 Назад", callback_data=f"eu:refresh:{entity_id}")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+async def _render_history(entity_id: int, page: int, page_size: int = 10) -> tuple[str, InlineKeyboardMarkup]:
+    total = 0
+    try:
+        total = await count_user_requests(entity_id)
+    except Exception:
+        total = 0
+    max_page = max(0, (total - 1) // page_size) if total else 0
+    page = max(0, min(page, max_page))
+    offset = page * page_size
+
+    items = []
+    try:
+        items = await get_user_requests(entity_id, limit=page_size, offset=offset)
+    except Exception:
+        items = []
+
+    lines = []
+    lines.append(f"<b>📜 History</b> for <code>{entity_id}</code>")
+    lines.append(f"<b>Total:</b> {total}")
+
+    if not items:
+        lines.append("\n<i>No history yet.</i>")
+        kb = _kb_history(entity_id, page, total, page_size)
+        return "\n".join(lines), kb
+
+    lines.append("")
+    send_rows: list[list[InlineKeyboardButton]] = []
+    for r in items:
+        dt = _fmt_dt(getattr(r, "created_at", None))
+        kind = escape(str(getattr(r, "kind", "")) or "")
+        media_type = escape(str(getattr(r, "media_type", "")) or "")
+        title = escape(str(getattr(r, "title", "")) or "")
+        url = escape(str(getattr(r, "url", "")) or "")
+        hit = "HIT" if getattr(r, "cache_hit", False) else "MISS"
+        cache_id = getattr(r, "cache_id", None)
+        cid = f" | cache:{cache_id}" if cache_id else ""
+        tline = f"<b>{dt}</b> [{hit}] <code>{kind}</code> <code>{media_type}</code>{cid}"
+        if title:
+            tline += f"\n{title}"
+        if url:
+            tline += f"\n{url}"
+        lines.append(tline)
+        lines.append("")
+
+        if cache_id:
+            btn_text = f"📥 {dt} {media_type}".strip()
+            if len(btn_text) > 50:
+                btn_text = btn_text[:50]
+            send_rows.append([InlineKeyboardButton(text=btn_text, callback_data=f"eu:hget:{entity_id}:{int(cache_id)}")])
+
+    kb = _kb_history(entity_id, page, total, page_size, send_rows=send_rows)
+    return "\n".join(lines).strip(), kb
 
 
 async def _get_chat_safe(entity_id: int) -> tuple[types.Chat | None, str | None]:
@@ -184,13 +270,12 @@ async def cmd_edituser(message: types.Message, command: CommandObject):
 
 @router.callback_query(F.data.startswith("eu:"))
 async def cb_edituser(call: types.CallbackQuery):
-    try:
-        _, action, raw_id = call.data.split(":", 2)
-    except Exception:
+    parts = (call.data or "").split(":")
+    if len(parts) < 3:
         await call.answer("Bad action", show_alert=True)
         return
-
-    entity_id = _safe_int(raw_id)
+    action = parts[1]
+    entity_id = _safe_int(parts[2])
     if entity_id is None:
         await call.answer("Bad id", show_alert=True)
         return
@@ -198,6 +283,99 @@ async def cb_edituser(call: types.CallbackQuery):
     admin_id = call.from_user.id
     card_chat_id = call.message.chat.id if call.message else admin_id
     card_msg_id = call.message.message_id if call.message else None
+
+    if action == "hist":
+        page = 0
+        if len(parts) >= 4:
+            page = _safe_int(parts[3]) or 0
+        text, kb = await _render_history(entity_id, page)
+        await call.answer("OK")
+        try:
+            await bot.edit_message_text(text, chat_id=card_chat_id, message_id=card_msg_id, reply_markup=kb, disable_web_page_preview=True)
+        except Exception:
+            await bot.send_message(card_chat_id, text, reply_markup=kb, disable_web_page_preview=True)
+        return
+
+    if action == "hget":
+        if len(parts) < 4:
+            await call.answer("Bad cache id", show_alert=True)
+            return
+        cache_id = _safe_int(parts[3])
+        if cache_id is None:
+            await call.answer("Bad cache id", show_alert=True)
+            return
+
+        cache = await get_cached_media_by_id(cache_id)
+        if not cache or int(getattr(cache, "user_id", 0)) != int(entity_id):
+            await call.answer("Not found", show_alert=True)
+            return
+
+        await call.answer("Sending…")
+        caption = None
+        try:
+            title = getattr(cache, "title", None)
+            url = getattr(cache, "url", None)
+            if title and url:
+                caption = f"<a href=\"{escape(str(url))}\">{escape(str(title))}</a>"
+            elif title:
+                caption = escape(str(title))
+            elif url:
+                caption = escape(str(url))
+        except Exception:
+            caption = None
+
+        mt = getattr(cache, "media_type", None)
+        fid = getattr(cache, "file_id", None)
+
+        if mt == "video":
+            await bot.send_video(card_chat_id, fid, caption=caption, parse_mode="HTML", supports_streaming=True)
+            return
+        if mt == "video_note":
+            # Video notes don't support captions.
+            await bot.send_video_note(card_chat_id, fid)
+            if caption:
+                try:
+                    await bot.send_message(card_chat_id, caption, parse_mode="HTML", disable_web_page_preview=True)
+                except Exception:
+                    pass
+            return
+        if mt == "audio":
+            await bot.send_audio(card_chat_id, fid, caption=caption, parse_mode="HTML")
+            return
+        if mt == "photo":
+            await bot.send_photo(card_chat_id, fid, caption=caption, parse_mode="HTML")
+            return
+        if mt == "tiktok_slides":
+            import json as _json
+            from aiogram.types import InputMediaPhoto
+
+            payload = {}
+            try:
+                payload = _json.loads(fid or "{}")
+            except Exception:
+                payload = {}
+            photos = payload.get("photos") or []
+            audio_id = payload.get("audio")
+            if photos:
+                for chunk_start in range(0, len(photos), 10):
+                    chunk = photos[chunk_start:chunk_start + 10]
+                    media = []
+                    for i, pfid in enumerate(chunk):
+                        cap = caption if (chunk_start == 0 and i == 0) else None
+                        media.append(InputMediaPhoto(media=pfid, caption=cap, parse_mode="HTML"))
+                    try:
+                        await bot.send_media_group(card_chat_id, media=media)
+                    except Exception:
+                        pass
+            if audio_id:
+                try:
+                    await bot.send_audio(card_chat_id, audio_id, caption="🎵 Sound")
+                except Exception:
+                    pass
+            return
+
+        await call.answer("Unsupported media type", show_alert=True)
+        return
 
     if action == "add":
         api_chat, _ = await _get_chat_safe(entity_id)

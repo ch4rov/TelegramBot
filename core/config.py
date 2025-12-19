@@ -47,6 +47,31 @@ DB_NAME=telegram_bot
 TECH_CHAT_ID=
 LASTFM_API_KEY=
 LASTFM_SECRET=
+
+# === OAuth (Spotify/Yandex) ===
+# Public base URL of your tunnel, without trailing slash.
+# Example: https://YOUR_PUBLIC_HOST
+PUBLIC_BASE_URL=
+TEST_PUBLIC_BASE_URL=
+
+# Local HTTP server for OAuth callbacks (the tunnel points to this)
+OAUTH_HTTP_HOST=127.0.0.1
+OAUTH_HTTP_PORT=8088
+TEST_OAUTH_HTTP_PORT=8089
+
+# Spotify OAuth (separate apps for test/prod are recommended)
+SPOTIFY_CLIENT_ID=
+SPOTIFY_CLIENT_SECRET=
+TEST_SPOTIFY_CLIENT_ID=
+TEST_SPOTIFY_CLIENT_SECRET=
+SPOTIFY_SCOPES=user-read-currently-playing user-read-recently-played
+
+# Yandex OAuth (optional)
+YANDEX_CLIENT_ID=
+YANDEX_CLIENT_SECRET=
+TEST_YANDEX_CLIENT_ID=
+TEST_YANDEX_CLIENT_SECRET=
+YANDEX_SCOPES=
 """
     try:
         ENV_PATH.write_text(template, encoding="utf-8")
@@ -100,6 +125,28 @@ class Settings:
         self.USE_LOCAL_SERVER = os.getenv("USE_LOCAL_SERVER", "False").lower() in ("true", "1", "yes")
         self.LOCAL_SERVER_URL = os.getenv("LOCAL_SERVER_URL", "http://127.0.0.1:8081").strip()
         self.DROP_PENDING_UPDATES = True
+
+        # === OAuth callback server & provider apps ===
+        # Public base URL (tunnel). Used for redirect_uri.
+        public_base_url = os.getenv("TEST_PUBLIC_BASE_URL" if self.IS_TEST else "PUBLIC_BASE_URL", "").strip()
+        self.PUBLIC_BASE_URL = public_base_url.rstrip("/")
+
+        self.OAUTH_HTTP_HOST = os.getenv("OAUTH_HTTP_HOST", "127.0.0.1").strip() or "127.0.0.1"
+        port_var = "TEST_OAUTH_HTTP_PORT" if self.IS_TEST else "OAUTH_HTTP_PORT"
+        try:
+            self.OAUTH_HTTP_PORT = int(os.getenv(port_var, "8089" if self.IS_TEST else "8088"))
+        except Exception:
+            self.OAUTH_HTTP_PORT = 8089 if self.IS_TEST else 8088
+
+        # Spotify
+        self.SPOTIFY_CLIENT_ID = (os.getenv("TEST_SPOTIFY_CLIENT_ID" if self.IS_TEST else "SPOTIFY_CLIENT_ID", "") or "").strip()
+        self.SPOTIFY_CLIENT_SECRET = (os.getenv("TEST_SPOTIFY_CLIENT_SECRET" if self.IS_TEST else "SPOTIFY_CLIENT_SECRET", "") or "").strip()
+        self.SPOTIFY_SCOPES = (os.getenv("SPOTIFY_SCOPES", "user-read-currently-playing user-read-recently-played") or "").strip()
+
+        # Yandex
+        self.YANDEX_CLIENT_ID = (os.getenv("TEST_YANDEX_CLIENT_ID" if self.IS_TEST else "YANDEX_CLIENT_ID", "") or "").strip()
+        self.YANDEX_CLIENT_SECRET = (os.getenv("TEST_YANDEX_CLIENT_SECRET" if self.IS_TEST else "YANDEX_CLIENT_SECRET", "") or "").strip()
+        self.YANDEX_SCOPES = (os.getenv("YANDEX_SCOPES", "") or "").strip()
         
         # 6. Database
         db_type = os.getenv("DB_TYPE", "sqlite").lower()

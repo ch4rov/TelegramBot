@@ -15,7 +15,7 @@ from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.client.default import DefaultBotProperties
 from aiohttp.client_exceptions import ClientResponseError
 from core.config import config
-from services.database.repo import is_user_banned, increment_request_count
+from services.database.repo import is_user_banned, increment_request_count, upsert_cached_media, log_user_request
 from services.platforms.TelegramDownloader.workflow import fix_local_path
 
 logger = logging.getLogger(__name__)
@@ -287,6 +287,12 @@ async def process_video(message: types.Message, user_lang: str = "en"):
             pass
         
         file_id = message.video.file_id
+        cache_key = None
+        try:
+            # Use file_unique_id to avoid token-specific file_id volatility.
+            cache_key = f"tg:video_note:{message.video.file_unique_id}"
+        except Exception:
+            cache_key = f"tg:video_note:{file_id}"
         
         temp_dir = "tempfiles"
         os.makedirs(temp_dir, exist_ok=True)
@@ -344,9 +350,32 @@ async def process_video(message: types.Message, user_lang: str = "en"):
         if os.path.exists(output_path):
             # Stage: uploading video note to Telegram
             current_action = ChatAction.UPLOAD_VIDEO_NOTE
-            await message.answer_video_note(FSInputFile(output_path), disable_notification=True)
+            sent = await message.answer_video_note(FSInputFile(output_path), disable_notification=True)
             os.remove(output_path)
             logger.info(f"User {message.from_user.id} converted video to video note")
+
+            # Cache + history
+            try:
+                if sent and getattr(sent, "video_note", None) and cache_key:
+                    cache = await upsert_cached_media(
+                        message.from_user.id,
+                        cache_key,
+                        sent.video_note.file_id,
+                        "video_note",
+                        title="Video note",
+                    )
+                    await log_user_request(
+                        message.from_user.id,
+                        kind="videomessage",
+                        input_text="/videomessage",
+                        url=cache_key,
+                        media_type="video_note",
+                        title="Video note",
+                        cache_hit=False,
+                        cache_id=cache.id,
+                    )
+            except Exception:
+                pass
         else:
             await message.answer("❌ Error converting video", disable_notification=True)
         

@@ -14,6 +14,7 @@ from core.logger import setup_logger
 from core.commands_updater import set_bot_commands
 from services.database.core import init_db
 from services.placeholder_service import ensure_placeholders
+from services.oauth_server import OAuthServer
 
 # Импорты мидлварей
 from middlewares.logger import LoggingMiddleware
@@ -89,6 +90,18 @@ async def main():
     # Регистрация событий
     dp.startup.register(on_startup)
     dp.shutdown.register(on_shutdown)
+
+    # OAuth callback server (aiohttp) for Spotify/Yandex
+    oauth_server = OAuthServer(bot)
+
+    async def _oauth_startup(_: Bot):
+        await oauth_server.start()
+
+    async def _oauth_shutdown(_: Bot):
+        await oauth_server.stop()
+
+    dp.startup.register(_oauth_startup)
+    dp.shutdown.register(_oauth_shutdown)
 
     # Запуск
     logger.info("Starting polling...")

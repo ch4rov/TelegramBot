@@ -23,6 +23,9 @@ URL_PATTERNS = {
     'twitch': r'(twitch\.tv|clips\.twitch\.tv)',
     'soundcloud': r'soundcloud\.com',
     'spotify': r'open\.spotify\.com',
+    'apple_music': r'music\.apple\.com',
+    # Yandex Music can be hosted on multiple TLDs (ru/by/kz/com); Disk short links are yadi.sk
+    'yandex': r'(music\.yandex\.(ru|by|kz|com)|disk\.yandex\.ru|yadi\.sk)',
 }
 
 def is_valid_url(text):
@@ -39,18 +42,47 @@ async def download_content(url, custom_opts=None, user_id=None):
     """Download content from URL using yt-dlp"""
     original_url = url
 
-    # Spotify is not directly downloadable; fall back to a YouTube link via Odesli (song.link)
+    is_yandex_music = bool(url and re.search(r'music\.yandex\.(ru|by|kz|com)', url))
+    is_apple_music = bool(url and re.search(r'music\.apple\.com', url))
+    is_yandex_disk = bool(url and re.search(r'(disk\.yandex\.ru|yadi\.sk)', url))
+
+    # Yandex Disk public links: download directly via Disk API (yt-dlp doesn't reliably support these).
+    if is_yandex_disk:
+        folder_name = str(uuid.uuid4())
+        save_path = os.path.join("tempfiles", folder_name)
+        os.makedirs(save_path, exist_ok=True)
+        try:
+            from services.platforms.YandexDownloader import YandexDiskPublicStrategy
+
+            strategy = YandexDiskPublicStrategy(original_url)
+            files, folder, error, meta = await strategy.download(save_path)
+            return files or [], folder or save_path, error, meta or {}
+        except Exception as e:
+            # Fall back to yt-dlp attempts below
+            logger.warning(f"Yandex Disk direct download failed, falling back to yt-dlp: {e}")
+            try:
+                if os.path.exists(save_path):
+                    shutil.rmtree(save_path, ignore_errors=True)
+            except Exception:
+                pass
+
+    # Spotify / Yandex Music / Apple Music are not directly downloadable; fall back via Odesli (song.link)
     try:
-        if url and re.search(URL_PATTERNS.get('spotify', r'$^'), url):
+        if url and (re.search(URL_PATTERNS.get('spotify', r'$^'), url) or is_yandex_music or is_apple_music):
             links = await get_links_by_url(url)
             yt_url = None
+            sc_url = None
             if links and links.get('links'):
                 yt_url = links['links'].get('YouTube')
+                sc_url = links['links'].get('SoundCloud')
             if yt_url:
                 url = yt_url
-                logger.info(f"Spotify fallback via YouTube: {original_url} -> {url}")
+                logger.info(f"Odesli fallback via YouTube: {original_url} -> {url}")
+            elif sc_url:
+                url = sc_url
+                logger.info(f"Odesli fallback via SoundCloud: {original_url} -> {url}")
     except Exception as e:
-        logger.warning(f"Spotify fallback failed for {original_url}: {e}")
+        logger.warning(f"Odesli fallback failed for {original_url}: {e}")
 
     folder_name = str(uuid.uuid4())
     save_path = os.path.join("tempfiles", folder_name)
@@ -121,6 +153,22 @@ async def download_content(url, custom_opts=None, user_id=None):
     # Default safer format for YouTube: prefer a single-file mp4 when possible
     if re.search(URL_PATTERNS['youtube'], url) and 'format' not in ydl_opts:
         ydl_opts['format'] = 'best[ext=mp4]/best'
+
+    # If original link was Yandex Music and caller didn't override: download audio.
+    if is_yandex_music and not (custom_opts and ('format' in custom_opts or 'postprocessors' in custom_opts)):
+        ydl_opts['format'] = 'bestaudio/best'
+        ydl_opts['writethumbnail'] = True
+        ydl_opts['postprocessors'] = [
+            {
+                'key': 'FFmpegExtractAudio',
+                'preferredcodec': 'mp3',
+                'preferredquality': '192',
+            }
+        ]
+
+    # TikTok Photos: encourage extractor to download the carousel items.
+    if url and re.search(URL_PATTERNS.get('tiktok', r'$^'), url) and "/photo/" in url and 'format' not in ydl_opts:
+        ydl_opts['format'] = 'best'
 
     if cookie_path:
         ydl_opts['cookiefile'] = cookie_path

@@ -23,7 +23,13 @@ from core.loader import bot
 from core.config import config
 from services.platforms.platform_manager import download_content, is_valid_url 
 from services.placeholder_service import get_placeholder 
-from services.database.repo import get_user, get_module_status
+from services.database.repo import (
+    get_user,
+    get_module_status,
+    get_cached_media,
+    upsert_cached_media,
+    log_user_request,
+)
 from services.lastfm_service import get_user_recent_track
 from services.search_service import search_music
 
@@ -250,6 +256,45 @@ async def chosen_handler(chosen_result: types.ChosenInlineResult):
 
     if not url: return
 
+    desired_cache_type = "audio" if (is_music_mode or is_link_audio) else "video"
+
+    # Cache hit: edit inline message without re-downloading.
+    try:
+        cached = await get_cached_media(user.id, url, desired_cache_type)
+    except Exception:
+        cached = None
+
+    if cached and cached.file_id:
+        try:
+            title = (cached.title or "Media").strip()
+            caption_text = f'<a href="{url}">{html.escape(title)}</a>'
+            if desired_cache_type == "audio" and is_music_mode:
+                caption_text += f" | <a href=\"https://song.link/{url}\">Links</a>"
+
+            if desired_cache_type == "audio":
+                new_media = InputMediaAudio(media=cached.file_id, caption=caption_text, parse_mode="HTML")
+            else:
+                new_media = InputMediaVideo(media=cached.file_id, caption=caption_text, parse_mode="HTML", supports_streaming=True)
+
+            await bot.edit_message_media(inline_message_id=inline_msg_id, media=new_media)
+            try:
+                await log_user_request(
+                    user.id,
+                    kind="inline",
+                    input_text=chosen_result.query or "",
+                    url=url,
+                    media_type=desired_cache_type,
+                    title=cached.title,
+                    cache_hit=True,
+                    cache_id=cached.id,
+                )
+            except Exception:
+                pass
+            return
+        except Exception:
+            # Fall through to download
+            pass
+
     # === НАСТРОЙКИ ЗАГРУЗЧИКА ===
     is_local = config.USE_LOCAL_SERVER
     current_limit = LIMIT_LOCAL if is_local else LIMIT_PUBLIC
@@ -277,7 +322,7 @@ async def chosen_handler(chosen_result: types.ChosenInlineResult):
         }
 
     # === ЗАГРУЗКА ===
-    files, folder_path, error, meta = await download_content(url, custom_opts)
+    files, folder_path, error, meta = await download_content(url, custom_opts, user_id=user.id)
 
     if error:
         try: await bot.edit_message_caption(inline_message_id=inline_msg_id, caption=f"❌ {error}")
@@ -396,6 +441,23 @@ async def chosen_handler(chosen_result: types.ChosenInlineResult):
                 await asyncio.sleep(0.5)
                 try: await bot.delete_message(user.id, sent_msg.message_id)
                 except: pass
+
+            # Cache + history
+            try:
+                cache_title = meta_title
+                cache = await upsert_cached_media(user.id, url, telegram_file_id, media_type if media_type in ("audio", "video") else desired_cache_type, title=str(cache_title) if cache_title else None)
+                await log_user_request(
+                    user.id,
+                    kind="inline",
+                    input_text=chosen_result.query or "",
+                    url=url,
+                    media_type=media_type if media_type in ("audio", "video") else desired_cache_type,
+                    title=str(cache_title) if cache_title else None,
+                    cache_hit=False,
+                    cache_id=cache.id,
+                )
+            except Exception:
+                pass
 
     except Exception as e:
         print(f"Inline Processing Error: {e}")

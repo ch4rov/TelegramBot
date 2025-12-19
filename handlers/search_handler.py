@@ -9,10 +9,16 @@ import logging
 import asyncio
 import subprocess
 from aiogram import Router, F, types
-from aiogram.types import FSInputFile
+from aiogram.types import FSInputFile, InputMediaPhoto
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.enums import ChatAction
-from services.database.repo import add_or_update_user, increment_request_count
+from services.database.repo import (
+    add_or_update_user,
+    increment_request_count,
+    get_cached_media,
+    upsert_cached_media,
+    log_user_request,
+)
 from services.platforms.platform_manager import download_content, is_valid_url
 import settings
 from services.url_cleaner import clean_url
@@ -315,6 +321,36 @@ async def handle_music_selection(cb: types.CallbackQuery, user_lang: str = "en")
     video_id = cb.data.split(":", 2)[2]
     src_url = f"https://youtu.be/{video_id}"
 
+    # Per-user cache (audio)
+    try:
+        cached = await get_cached_media(cb.from_user.id, src_url, "audio")
+    except Exception:
+        cached = None
+    if cached:
+        try:
+            caption = make_caption({"title": cached.title or "Media"}, src_url, links_page=None)
+            await cb.message.answer_audio(
+                cached.file_id,
+                caption=caption,
+                parse_mode="HTML",
+            )
+            try:
+                await log_user_request(
+                    cb.from_user.id,
+                    kind="callback",
+                    input_text=cb.data,
+                    url=src_url,
+                    media_type="audio",
+                    title=cached.title,
+                    cache_hit=True,
+                    cache_id=cached.id,
+                )
+            except Exception:
+                pass
+        except Exception:
+            pass
+        return
+
     status = None
     pulsar = None
     try:
@@ -376,8 +412,9 @@ async def handle_music_selection(cb: types.CallbackQuery, user_lang: str = "en")
         if pulsar:
             pulsar.set_action(ACTION_UPLOAD_AUDIO)
 
+        sent = None
         if thumb_path:
-            await cb.message.answer_audio(
+            sent = await cb.message.answer_audio(
                 FSInputFile(target),
                 caption=caption,
                 parse_mode="HTML",
@@ -386,13 +423,30 @@ async def handle_music_selection(cb: types.CallbackQuery, user_lang: str = "en")
                 thumbnail=FSInputFile(thumb_path),
             )
         else:
-            await cb.message.answer_audio(
+            sent = await cb.message.answer_audio(
                 FSInputFile(target),
                 caption=caption,
                 parse_mode="HTML",
                 performer=performer,
                 title=title,
             )
+
+        try:
+            if sent and sent.audio:
+                cache_title = (meta or {}).get("track") or (meta or {}).get("title") or title
+                cache = await upsert_cached_media(cb.from_user.id, src_url, sent.audio.file_id, "audio", title=str(cache_title) if cache_title else None)
+                await log_user_request(
+                    cb.from_user.id,
+                    kind="callback",
+                    input_text=cb.data,
+                    url=src_url,
+                    media_type="audio",
+                    title=str(cache_title) if cache_title else None,
+                    cache_hit=False,
+                    cache_id=cache.id,
+                )
+        except Exception:
+            pass
     except Exception as e:
         try:
             await cb.message.answer(f"⚠️ {html.escape(str(e))}", parse_mode="HTML")
@@ -414,6 +468,37 @@ async def handle_music_selection(cb: types.CallbackQuery, user_lang: str = "en")
 async def cb_download_ytm_clip(cb: types.CallbackQuery, user_lang: str = "en"):
     url = cb.data.split(":", 1)[1]
     src_url = clean_url(url)
+
+    # Per-user cache (video)
+    try:
+        cached = await get_cached_media(cb.from_user.id, src_url, "video")
+    except Exception:
+        cached = None
+    if cached:
+        try:
+            caption = make_caption({"title": cached.title or "Media"}, src_url, links_page=None)
+            await cb.message.answer_video(
+                cached.file_id,
+                caption=caption,
+                supports_streaming=True,
+                parse_mode="HTML",
+            )
+            try:
+                await log_user_request(
+                    cb.from_user.id,
+                    kind="callback",
+                    input_text=cb.data,
+                    url=src_url,
+                    media_type="video",
+                    title=cached.title,
+                    cache_hit=True,
+                    cache_id=cached.id,
+                )
+            except Exception:
+                pass
+        except Exception:
+            pass
+        return
 
     status = None
     pulsar = None
@@ -484,7 +569,7 @@ async def cb_download_ytm_clip(cb: types.CallbackQuery, user_lang: str = "en"):
         except Exception:
             height = None
 
-        await cb.message.answer_video(
+        sent = await cb.message.answer_video(
             FSInputFile(target),
             caption=caption,
             supports_streaming=True,
@@ -492,6 +577,23 @@ async def cb_download_ytm_clip(cb: types.CallbackQuery, user_lang: str = "en"):
             width=width,
             height=height,
         )
+
+        try:
+            if sent and sent.video:
+                cache_title = (meta or {}).get("title")
+                cache = await upsert_cached_media(cb.from_user.id, src_url, sent.video.file_id, "video", title=str(cache_title) if cache_title else None)
+                await log_user_request(
+                    cb.from_user.id,
+                    kind="callback",
+                    input_text=cb.data,
+                    url=src_url,
+                    media_type="video",
+                    title=str(cache_title) if cache_title else None,
+                    cache_hit=False,
+                    cache_id=cache.id,
+                )
+        except Exception:
+            pass
         if pulsar:
             await pulsar.stop()
         try:
@@ -537,7 +639,80 @@ async def message_handler(message: types.Message, user_lang: str = "en"):
         display_url = clean_url(text)
         src_url = display_url
 
-        # Pre-resolve Links (and also helps Spotify -> YouTube fallback inside download_content)
+        is_tiktok = "tiktok" in src_url
+        is_tiktok_photo = is_tiktok and ("/photo/" in src_url)
+
+        is_ytm = "music.youtube.com" in src_url
+        is_soundcloud = "soundcloud.com" in src_url
+        is_spotify = "open.spotify.com" in src_url
+        is_twitch = ("twitch.tv" in src_url) or ("clips.twitch.tv" in src_url)
+
+        wants_audio = is_ytm or is_soundcloud or is_spotify
+        cache_type = "tiktok_slides" if is_tiktok_photo else ("audio" if wants_audio else "video")
+
+        # Cache hit: send without hitting platforms
+        cached = None
+        try:
+            cached = await get_cached_media(message.from_user.id, display_url, cache_type)
+        except Exception:
+            cached = None
+
+        if cached:
+            try:
+                caption = make_caption({"title": cached.title or "Media"}, display_url, links_page=None)
+
+                if cache_type == "video":
+                    await message.answer_video(cached.file_id, caption=caption, supports_streaming=True, parse_mode="HTML")
+                elif cache_type == "audio":
+                    await message.answer_audio(cached.file_id, caption=caption, parse_mode="HTML")
+                elif cache_type == "tiktok_slides":
+                    payload = {}
+                    try:
+                        payload = json.loads(cached.file_id or "{}")
+                    except Exception:
+                        payload = {}
+                    photos = payload.get("photos") or []
+                    audio_id = payload.get("audio")
+                    if photos:
+                        for chunk_start in range(0, len(photos), 10):
+                            chunk = photos[chunk_start:chunk_start + 10]
+                            media = []
+                            for i, fid in enumerate(chunk):
+                                cap = caption if (chunk_start == 0 and i == 0) else None
+                                media.append(InputMediaPhoto(media=fid, caption=cap, parse_mode="HTML"))
+                            try:
+                                await message.answer_media_group(media=media)
+                            except Exception:
+                                pass
+                    if audio_id:
+                        try:
+                            await message.answer_audio(audio_id, caption="🎵 Sound")
+                        except Exception:
+                            pass
+
+                try:
+                    await log_user_request(
+                        message.from_user.id,
+                        kind="message_url",
+                        input_text=text,
+                        url=display_url,
+                        media_type=cache_type,
+                        title=cached.title,
+                        cache_hit=True,
+                        cache_id=cached.id,
+                    )
+                except Exception:
+                    pass
+            finally:
+                try:
+                    await status.delete()
+                except Exception:
+                    pass
+                if pulsar:
+                    await pulsar.stop()
+            return
+
+        # Pre-resolve Links only when we actually download
         links_page = None
         try:
             links = await get_links_by_url(display_url)
@@ -545,11 +720,6 @@ async def message_handler(message: types.Message, user_lang: str = "en"):
                 links_page = links['page']
         except Exception:
             pass
-
-        is_ytm = "music.youtube.com" in src_url
-        is_soundcloud = "soundcloud.com" in src_url
-        is_spotify = "open.spotify.com" in src_url
-        is_twitch = ("twitch.tv" in src_url) or ("clips.twitch.tv" in src_url)
 
         # YouTube Music / SoundCloud / Spotify should be audio-only
         if is_ytm:
@@ -608,8 +778,69 @@ async def message_handler(message: types.Message, user_lang: str = "en"):
         try:
             audio_exts = ('.mp3', '.m4a', '.opus', '.ogg')
             video_exts = ('.mp4', '.mov', '.mkv', '.webm')
+            image_exts = ('.jpg', '.jpeg', '.png', '.webp')
 
-            wants_audio = is_ytm or is_soundcloud or is_spotify
+            # TikTok Photos: send carousel as albums (10 per group) + attached audio
+            if is_tiktok_photo:
+                images = [f for f in files if f.lower().endswith(image_exts)]
+                audio_file = next((f for f in files if f.lower().endswith(audio_exts)), None)
+                if not images:
+                    raise Exception("No images found")
+
+                caption = make_caption(meta or {}, display_url, links_page=links_page)
+
+                collected_photo_ids: list[str] = []
+                for chunk_start in range(0, len(images), 10):
+                    chunk = images[chunk_start:chunk_start + 10]
+                    media = []
+                    for i, img in enumerate(chunk):
+                        cap = caption if (chunk_start == 0 and i == 0) else None
+                        media.append(InputMediaPhoto(media=FSInputFile(img), caption=cap, parse_mode="HTML"))
+
+                    msgs = await message.answer_media_group(media=media)
+                    for m in (msgs or []):
+                        try:
+                            if m.photo:
+                                collected_photo_ids.append(m.photo[-1].file_id)
+                        except Exception:
+                            pass
+
+                audio_file_id = None
+                if audio_file:
+                    if pulsar:
+                        pulsar.set_action(ACTION_UPLOAD_AUDIO)
+                    try:
+                        a_msg = await message.answer_audio(FSInputFile(audio_file), caption="🎵 Sound")
+                        if a_msg and a_msg.audio:
+                            audio_file_id = a_msg.audio.file_id
+                    except Exception:
+                        pass
+
+                try:
+                    payload = json.dumps({"photos": collected_photo_ids, "audio": audio_file_id}, ensure_ascii=False)
+                    cache_title = (meta or {}).get("title")
+                    cache = await upsert_cached_media(message.from_user.id, display_url, payload, "tiktok_slides", title=str(cache_title) if cache_title else None)
+                    await log_user_request(
+                        message.from_user.id,
+                        kind="message_url",
+                        input_text=text,
+                        url=display_url,
+                        media_type="tiktok_slides",
+                        title=str(cache_title) if cache_title else None,
+                        cache_hit=False,
+                        cache_id=cache.id,
+                    )
+                except Exception:
+                    pass
+
+                try:
+                    await status.delete()
+                except Exception:
+                    pass
+                if pulsar:
+                    await pulsar.stop()
+                return
+
             if wants_audio:
                 target = next((f for f in files if f.lower().endswith(audio_exts)), None)
             else:
@@ -650,7 +881,7 @@ async def message_handler(message: types.Message, user_lang: str = "en"):
 
                 width, height = await _probe_video_dims(target)
 
-                await message.answer_video(
+                sent = await message.answer_video(
                     FSInputFile(target),
                     caption=caption,
                     supports_streaming=True,
@@ -658,6 +889,23 @@ async def message_handler(message: types.Message, user_lang: str = "en"):
                     width=width,
                     height=height,
                 )
+
+                try:
+                    if sent and sent.video:
+                        cache_title = (meta or {}).get("title")
+                        cache = await upsert_cached_media(message.from_user.id, display_url, sent.video.file_id, "video", title=str(cache_title) if cache_title else None)
+                        await log_user_request(
+                            message.from_user.id,
+                            kind="message_url",
+                            input_text=text,
+                            url=display_url,
+                            media_type="video",
+                            title=str(cache_title) if cache_title else None,
+                            cache_hit=False,
+                            cache_id=cache.id,
+                        )
+                except Exception:
+                    pass
             else:
                 # Optional cover
                 thumb_path = next((f for f in files if f.lower().endswith(('.jpg', '.jpeg', '.png', '.webp'))), None)
@@ -675,8 +923,9 @@ async def message_handler(message: types.Message, user_lang: str = "en"):
                 if pulsar:
                     pulsar.set_action(ACTION_UPLOAD_AUDIO)
 
+                sent = None
                 if thumb_path:
-                    await message.answer_audio(
+                    sent = await message.answer_audio(
                         FSInputFile(target),
                         caption=caption,
                         parse_mode="HTML",
@@ -686,7 +935,7 @@ async def message_handler(message: types.Message, user_lang: str = "en"):
                         reply_markup=kb,
                     )
                 else:
-                    await message.answer_audio(
+                    sent = await message.answer_audio(
                         FSInputFile(target),
                         caption=caption,
                         parse_mode="HTML",
@@ -694,6 +943,23 @@ async def message_handler(message: types.Message, user_lang: str = "en"):
                         title=title,
                         reply_markup=kb,
                     )
+
+                try:
+                    if sent and sent.audio:
+                        cache_title = (meta or {}).get("track") or (meta or {}).get("title") or title
+                        cache = await upsert_cached_media(message.from_user.id, display_url, sent.audio.file_id, "audio", title=str(cache_title) if cache_title else None)
+                        await log_user_request(
+                            message.from_user.id,
+                            kind="message_url",
+                            input_text=text,
+                            url=display_url,
+                            media_type="audio",
+                            title=str(cache_title) if cache_title else None,
+                            cache_hit=False,
+                            cache_id=cache.id,
+                        )
+                except Exception:
+                    pass
             
             try: await status.delete()
             except: pass

@@ -13,6 +13,7 @@ from services.search_service import search_youtube
 from services.platforms.platform_manager import download_content
 from services.odesli_service import get_links_by_url
 from handlers.search_handler import make_caption
+from services.database.repo import get_cached_media, upsert_cached_media, log_user_request
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -105,6 +106,35 @@ async def yt_pick_download(cb: types.CallbackQuery):
     vid = cb.data.split(":", 1)[1]
     src_url = f"https://youtu.be/{vid}"
 
+    # Cache hit: audio
+    try:
+        cached = await get_cached_media(cb.from_user.id, src_url, "audio")
+    except Exception:
+        cached = None
+    if cached:
+        kb = InlineKeyboardMarkup(
+            inline_keyboard=[[InlineKeyboardButton(text="🎬 Скачать клип", callback_data=f"ytm_clip:{src_url}")]]
+        )
+        try:
+            caption = make_caption({"title": cached.title or "Media"}, src_url, links_page=None)
+            await cb.message.answer_audio(cached.file_id, caption=caption, parse_mode="HTML", reply_markup=kb)
+            try:
+                await log_user_request(
+                    cb.from_user.id,
+                    kind="text_search",
+                    input_text=cb.data,
+                    url=src_url,
+                    media_type="audio",
+                    title=cached.title,
+                    cache_hit=True,
+                    cache_id=cached.id,
+                )
+            except Exception:
+                pass
+        except Exception:
+            pass
+        return
+
     status = None
     pulsar = None
     try:
@@ -119,10 +149,16 @@ async def yt_pick_download(cb: types.CallbackQuery):
         pulsar = None
 
     custom_opts = {
-        "format": "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
-        "merge_output_format": "mp4",
+        "format": "bestaudio/best",
         "noplaylist": True,
-        "writethumbnail": False,
+        "writethumbnail": True,
+        "postprocessors": [
+            {
+                "key": "FFmpegExtractAudio",
+                "preferredcodec": "mp3",
+                "preferredquality": "192",
+            }
+        ],
     }
 
     files, folder, error, meta = await download_content(src_url, custom_opts, user_id=cb.from_user.id)
@@ -140,12 +176,13 @@ async def yt_pick_download(cb: types.CallbackQuery):
         return
 
     try:
-        target = next((f for f in files if f.lower().endswith((".mp4", ".mov"))), None)
+        audio_exts = (".mp3", ".m4a", ".opus", ".ogg")
+        target = next((f for f in files if f.lower().endswith(audio_exts)), None)
         if not target:
-            raise Exception("No video found")
+            raise Exception("No audio found")
 
         if pulsar:
-            pulsar.set_action(ChatAction.UPLOAD_VIDEO)
+            pulsar.set_action(getattr(ChatAction, "UPLOAD_AUDIO", ChatAction.UPLOAD_DOCUMENT))
 
         links_page = None
         try:
@@ -156,13 +193,33 @@ async def yt_pick_download(cb: types.CallbackQuery):
             pass
 
         caption = make_caption(meta or {}, src_url, links_page=links_page)
+        kb = InlineKeyboardMarkup(
+            inline_keyboard=[[InlineKeyboardButton(text="🎬 Скачать клип", callback_data=f"ytm_clip:{src_url}")]]
+        )
 
-        await cb.message.answer_video(
+        sent = await cb.message.answer_audio(
             FSInputFile(target),
             caption=caption,
             parse_mode="HTML",
-            supports_streaming=True,
+            reply_markup=kb,
         )
+
+        try:
+            if sent and sent.audio:
+                cache_title = (meta or {}).get("track") or (meta or {}).get("title")
+                cache = await upsert_cached_media(cb.from_user.id, src_url, sent.audio.file_id, "audio", title=str(cache_title) if cache_title else None)
+                await log_user_request(
+                    cb.from_user.id,
+                    kind="text_search",
+                    input_text=cb.data,
+                    url=src_url,
+                    media_type="audio",
+                    title=str(cache_title) if cache_title else None,
+                    cache_hit=False,
+                    cache_id=cache.id,
+                )
+        except Exception:
+            pass
     except Exception as e:
         await cb.message.answer(f"⚠️ {html.escape(str(e))}")
     finally:
