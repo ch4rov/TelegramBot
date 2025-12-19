@@ -80,9 +80,13 @@ class OAuthServer:
   <meta charset=\"utf-8\" />
   <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />
   <title>ch4rov.bot</title>
+    <style>
+        html, body { height: 100%; width: 100%; margin: 0; padding: 0; background: #000; overflow: hidden; }
+        iframe { position: fixed; inset: 0; width: 100vw; height: 100vh; border: 0; }
+    </style>
 </head>
 <body>
-  <iframe width=\"560\" height=\"315\" src=\"https://www.youtube.com/embed/dQw4w9WgXcQ?si=Zo-GMtmPb-4KBZQk\" title=\"YouTube video player\" frameborder=\"0\" allow=\"accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share\" referrerpolicy=\"strict-origin-when-cross-origin\" allowfullscreen></iframe>
+    <iframe src=\"https://www.youtube.com/embed/iGRFB_voPXw?autoplay=1&mute=0&playsinline=1\" title=\"А че это вы здесь делаете,а?\" allow=\"accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share\" referrerpolicy=\"strict-origin-when-cross-origin\" allowfullscreen></iframe>
 </body>
 </html>"""
         return web.Response(text=html, status=200, content_type="text/html")
