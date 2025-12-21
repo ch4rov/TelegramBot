@@ -228,11 +228,12 @@ async def cmd_videomessage(message: types.Message, state: FSMContext):
             resize_keyboard=True
         )
         await safe_reply(
+            message,
             "🎥 <b>Video Note Mode</b>\n\nSend me any video and I'll convert it to a video note (square 640x640).\n\n"
             "Press ❌ Exit button to leave this mode.",
             reply_markup=kb,
             disable_notification=True,
-            parse_mode="HTML"
+            parse_mode="HTML",
         )
         await state.set_state(VideoNoteState.recording)
         logger.info(f"User {user.id} entered video note mode")

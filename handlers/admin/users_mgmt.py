@@ -73,7 +73,7 @@ def _render_users_page(all_users: list, page: int, page_size: int = 20) -> tuple
         lines.append("No users found.")
         return "\n".join(lines), _users_kb(0, 0)
 
-    # Build keyboard: navigation row + per-item open buttons
+    # Keyboard: navigation row only (no per-user buttons)
     kb_rows = _users_kb(page, max_page).inline_keyboard
 
     for obj in items[start:end]:
@@ -102,13 +102,6 @@ def _render_users_page(all_users: list, page: int, page_size: int = 20) -> tuple
             lines.append(f"<a href=\"{emoji_link}\">{emoji}</a> {status} {label} | <code>{eid}</code>")
         else:
             lines.append(f"{emoji} {status} {label} | <code>{eid}</code>")
-
-        # Button: open user/group if possible
-        if not is_group:
-            kb_rows.append([InlineKeyboardButton(text=f"👤 { _cap(full_name or str(eid), 30) }", url=f"tg://user?id={eid}")])
-        else:
-            if username:
-                kb_rows.append([InlineKeyboardButton(text=f"👥 { _cap(full_name or username, 30) }", url=f"https://t.me/{username.lstrip('@')}")])
 
     return "\n".join(lines), InlineKeyboardMarkup(inline_keyboard=kb_rows)
 
