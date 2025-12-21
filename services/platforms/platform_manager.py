@@ -10,6 +10,7 @@ from services.database.repo import get_user_cookie, get_global_cookie
 from services.odesli_service import get_links_by_url
 import subprocess
 import json
+import shutil
 
 logger = logging.getLogger(__name__)
 # URL patterns for different platforms
@@ -146,9 +147,21 @@ async def download_content(url, custom_opts=None, user_id=None):
         'writeinfojson': False,
         'writethumbnail': False,
         'restrictfilenames': True,
+        # A bit more robust defaults for flaky networks
+        'retries': 3,
+        'fragment_retries': 3,
+        # Helps speed on DASH/HLS without going crazy
+        'concurrent_fragment_downloads': 4,
     }
 
+    is_youtube = bool(re.search(URL_PATTERNS['youtube'], url))
     is_instagram = bool(re.search(URL_PATTERNS['instagram'], url))
+
+    # YouTube: prefer H.264/AAC MP4 to avoid iOS Telegram "static image with audio".
+    if is_youtube and 'format' not in ydl_opts and not (custom_opts and 'format' in custom_opts):
+        ydl_opts['format'] = 'bv*[ext=mp4][vcodec^=avc1]+ba[ext=m4a]/b[ext=mp4]/b'
+        ydl_opts['merge_output_format'] = 'mp4'
+        ydl_opts['remuxvideo'] = 'mp4'
 
     # Instagram sometimes offers "storyboard"/still-image variants; prefer a real H.264 mp4 video when possible.
     if is_instagram and 'format' not in ydl_opts and not (custom_opts and 'format' in custom_opts):
@@ -164,6 +177,11 @@ async def download_content(url, custom_opts=None, user_id=None):
         local_ffmpeg = os.path.join(installs_dir, "ffmpeg.exe")
         if os.path.exists(local_ffmpeg):
             ydl_opts["ffmpeg_location"] = local_ffmpeg
+        else:
+            system_ffmpeg = shutil.which("ffmpeg")
+            if system_ffmpeg:
+                # yt-dlp accepts either the binary path or the directory
+                ydl_opts["ffmpeg_location"] = os.path.dirname(system_ffmpeg) or system_ffmpeg
     except Exception:
         pass
 
@@ -415,8 +433,8 @@ async def download_content(url, custom_opts=None, user_id=None):
                 error = str(e)
                 logger.error(f"Instagram retry failed: {error}")
 
-    # Instagram: ensure the resulting mp4 is iOS-playable (avoid AV1/VP9) and has proper MP4 layout.
-    if is_instagram and not error:
+    # Instagram/YouTube: ensure the resulting mp4 is iOS-playable (avoid AV1/VP9).
+    if (is_instagram or is_youtube) and not error:
         video_candidates = [f for f in files if f.lower().endswith(".mp4")]
         for vp in video_candidates[:1]:
             fixed_path = _ensure_ios_playable_mp4(vp)

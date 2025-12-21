@@ -151,25 +151,21 @@ async def cb_login(call: types.CallbackQuery):
         return
 
     if action in ("spotify",):
-        # If connected: show profile and quick usage hint.
+        # Always start (re)connect flow on click.
+        # If already connected, we reset stored token so the new OAuth replaces it.
         tok = await get_user_oauth_token(user.id, "spotify")
         if tok:
-            label = await _spotify_profile_label(user.id)
-            await call.answer("OK")
-            await safe_reply_html(
-                call.message,
-                (
-                    f"✅ Spotify подключен: <code>{_h(label or 'connected')}</code>\n\nИспользование: открой inline и упомяни бота без текста."
-                    if lang == "ru"
-                    else f"✅ Spotify connected: <code>{_h(label or 'connected')}</code>\n\nUsage: open inline and mention the bot with empty query."
-                ),
-                disable_notification=True,
-            )
-            return
+            try:
+                from services.database.repo import delete_user_oauth_token
+
+                await delete_user_oauth_token(user.id, "spotify")
+            except Exception:
+                pass
 
         if not config.PUBLIC_BASE_URL:
             await call.answer("OK")
             await safe_reply(
+                call.message,
                 (
                     "Не задан PUBLIC_BASE_URL/TEST_PUBLIC_BASE_URL (адрес туннеля).\n"
                     "Сначала подними Cloudflare Tunnel/ngrok и запиши URL в .env.\n"
@@ -187,6 +183,7 @@ async def cb_login(call: types.CallbackQuery):
             if not config.SPOTIFY_CLIENT_ID or not config.SPOTIFY_CLIENT_SECRET:
                 await call.answer("OK")
                 await safe_reply(
+                    call.message,
                     ("Не заданы SPOTIFY_CLIENT_ID/SPOTIFY_CLIENT_SECRET (или TEST_* в тесте)." if lang == "ru" else "Missing SPOTIFY_CLIENT_ID/SPOTIFY_CLIENT_SECRET (or TEST_* in test mode)."),
                     disable_notification=True,
                 )
@@ -195,11 +192,16 @@ async def cb_login(call: types.CallbackQuery):
             url = build_spotify_authorize_url(state)
             await call.answer("OK")
             await safe_reply(
+                call.message,
                 (
-                    "Открой ссылку и разреши доступ:\n" + url + "\n\n"
+                    ("Переподключение Spotify: старая привязка будет заменена.\n\n" if tok and lang == "ru" else "")
+                    + "Открой ссылку и разреши доступ:\n" + url + "\n\n"
                     f"Redirect URI в Spotify должен быть: {config.PUBLIC_BASE_URL}/oauth/spotify/callback"
                     if lang == "ru"
-                    else "Open this URL to connect Spotify:\n" + url + f"\n\nRedirect URI must be: {config.PUBLIC_BASE_URL}/oauth/spotify/callback"
+                    else ("Reconnecting Spotify: your previous link will be replaced.\n\n" if tok else "")
+                    + "Open this URL to connect Spotify:\n"
+                    + url
+                    + f"\n\nRedirect URI must be: {config.PUBLIC_BASE_URL}/oauth/spotify/callback"
                 ),
                 disable_notification=True,
             )

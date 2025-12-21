@@ -488,8 +488,8 @@ async def chosen_handler(chosen_result: types.ChosenInlineResult):
     
     if is_music_mode or is_link_audio:
         custom_opts = {
-            'format': 'bestaudio/best',
-            'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '192'}],
+            'format': 'bestaudio[ext=m4a]/bestaudio/best',
+            'postprocessors': [],
             'writethumbnail': True,
             'keepvideo': False
         }

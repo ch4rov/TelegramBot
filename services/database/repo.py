@@ -147,6 +147,36 @@ async def delete_user(user_id: int) -> bool:
     """Delete user/group row from DB. Returns True if something was deleted."""
     async with session_maker() as session:
         async with session.begin():
+            # Best-effort cascade cleanup for per-user tables.
+            try:
+                await session.execute(delete(UserOAuthToken).where(UserOAuthToken.user_id == user_id))
+            except Exception:
+                pass
+            try:
+                await session.execute(delete(OAuthState).where(OAuthState.user_id == user_id))
+            except Exception:
+                pass
+            try:
+                await session.execute(delete(UserPreference).where(UserPreference.user_id == user_id))
+            except Exception:
+                pass
+            try:
+                await session.execute(delete(UserCookies).where(UserCookies.user_id == user_id))
+            except Exception:
+                pass
+            try:
+                await session.execute(delete(MediaCacheBypass).where(MediaCacheBypass.user_id == user_id))
+            except Exception:
+                pass
+            try:
+                await session.execute(delete(MediaCache).where(MediaCache.user_id == user_id))
+            except Exception:
+                pass
+            try:
+                await session.execute(delete(UserRequest).where(UserRequest.user_id == user_id))
+            except Exception:
+                pass
+
             res = await session.execute(delete(User).where(User.id == user_id))
             try:
                 return res.rowcount > 0

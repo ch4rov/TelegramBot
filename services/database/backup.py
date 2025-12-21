@@ -130,31 +130,100 @@ async def send_db_backup(bot, caption: str | None = None) -> bool:
 
 
 async def run_periodic_db_backup(bot) -> None:
-    """Run DB backup on a timer. Controlled by env vars.
+    """Run a daily DB backup once per 24h at a fixed local time.
 
+    Behavior:
+    - Sends backup only once per day (tracked in DB system_settings).
+    - Default schedule: 04:00 local time.
+    - If the bot starts after today's scheduled time and today's backup wasn't sent yet,
+      it will run shortly after startup (instead of waiting a full day).
+
+    Env:
     - TECH_CHAT_ID must be set.
-    - DB_BACKUP_INTERVAL_HOURS (default: 24)
-    - DB_BACKUP_RUN_ON_START (default: 1)
+    - DB_BACKUP_DAILY_AT (default: 04:00)
+    - DB_BACKUP_RUN_ON_START (default: 0)  # legacy/manual override
     """
+
+    from datetime import timedelta
+
     try:
-        interval_h = float((os.getenv("DB_BACKUP_INTERVAL_HOURS") or "24").strip() or "24")
+        from services.database.repo import get_system_value, set_system_value
     except Exception:
-        interval_h = 24.0
+        get_system_value = None
+        set_system_value = None
 
-    run_on_start = (os.getenv("DB_BACKUP_RUN_ON_START") or "1").strip().lower() not in ("0", "false", "no", "off")
+    key_last_day = "db_backup_last_day"  # YYYY-MM-DD
 
-    if run_on_start:
+    def _parse_hhmm(raw: str) -> tuple[int, int]:
         try:
-            ok = await send_db_backup(bot, caption="💾 DB backup (daily)")
-            logger.info("Daily DB backup run_on_start=%s ok=%s", run_on_start, ok)
+            raw = (raw or "").strip()
+            if not raw:
+                return 4, 0
+            parts = raw.split(":")
+            if len(parts) != 2:
+                return 4, 0
+            h = int(parts[0])
+            m = int(parts[1])
+            if not (0 <= h <= 23 and 0 <= m <= 59):
+                return 4, 0
+            return h, m
         except Exception:
-            logger.exception("Daily DB backup (startup) failed")
+            return 4, 0
 
-    sleep_s = max(60.0, interval_h * 3600.0)
-    while True:
-        await asyncio.sleep(sleep_s)
+    daily_at = os.getenv("DB_BACKUP_DAILY_AT") or "04:00"
+    hour, minute = _parse_hhmm(daily_at)
+
+    run_on_start = (os.getenv("DB_BACKUP_RUN_ON_START") or "0").strip().lower() not in ("0", "false", "no", "off")
+
+    async def _mark_sent(day: str) -> None:
+        if set_system_value:
+            try:
+                await set_system_value(key_last_day, day)
+            except Exception:
+                pass
+
+    async def _already_sent(day: str) -> bool:
+        if not get_system_value:
+            return False
         try:
-            ok = await send_db_backup(bot, caption="💾 DB backup (daily)")
-            logger.info("Daily DB backup ok=%s", ok)
+            return (await get_system_value(key_last_day)) == day
+        except Exception:
+            return False
+
+    async def _try_send_if_due(now: _dt.datetime) -> bool:
+        today = now.strftime("%Y-%m-%d")
+        scheduled_today = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+        if now < scheduled_today and not run_on_start:
+            return False
+        if await _already_sent(today):
+            return False
+
+        ok = await send_db_backup(bot, caption="💾 DB backup (daily)")
+        logger.info("Daily DB backup ok=%s", ok)
+        if ok:
+            await _mark_sent(today)
+        return ok
+
+    # On startup: run if it's due (or if explicitly requested via DB_BACKUP_RUN_ON_START).
+    try:
+        await _try_send_if_due(_dt.datetime.now())
+    except Exception:
+        logger.exception("Daily DB backup (startup) failed")
+
+    while True:
+        now = _dt.datetime.now()
+        next_run = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+        if next_run <= now:
+            next_run = next_run + timedelta(days=1)
+
+        sleep_s = max(30.0, (next_run - now).total_seconds())
+        await asyncio.sleep(sleep_s)
+
+        try:
+            ok = await _try_send_if_due(_dt.datetime.now())
+            # If sending failed, retry in 1 hour (keeps daily guarantee without spamming).
+            if not ok:
+                await asyncio.sleep(3600)
         except Exception:
             logger.exception("Daily DB backup failed")
+            await asyncio.sleep(3600)

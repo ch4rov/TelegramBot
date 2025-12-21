@@ -275,7 +275,8 @@ def make_caption(meta: dict, display_url: str, links_page: str | None = None) ->
     parts.append(f'<a href="{display_url}">{html.escape(str(title))}</a>')
 
     caption = "\n".join(parts)
-    if links_page:
+    # Don't append "Links" for YouTube URLs (it makes captions noisy and redundant).
+    if links_page and not _is_youtube_like(meta or {}, display_url):
         caption = caption + f' | <a href="{links_page}">Links</a>'
 
     # Add expandable full description (Telegram HTML supports <blockquote expandable>)
@@ -516,7 +517,7 @@ async def cb_download_ytm_clip(cb: types.CallbackQuery, user_lang: str = "en"):
         pulsar = None
 
     custom_opts = {
-        'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+        'format': 'bestvideo[ext=mp4][vcodec^=avc1]+bestaudio[ext=m4a]/best[ext=mp4]/best',
         'merge_output_format': 'mp4',
         'noplaylist': True,
         'writethumbnail': False,

@@ -106,13 +106,19 @@ async def cmd_cmd(message: types.Message):
     try:
         items = list(getattr(settings, "BOT_COMMANDS_LIST", []) or [])
 
+        # Show only commands that work without required arguments.
+        # (Commands like /ban require an argument, so they are excluded to stay "click-to-send" friendly.)
+        skip_requires_args = {"ban", "unban", "answer", "edituser"}
+        items = [x for x in items if x and str(x[0]) not in skip_requires_args]
+
         user_cmds = [x for x in items if len(x) >= 5 and x[3] == "user"]
         admin_cmds = [x for x in items if len(x) >= 5 and x[3] == "admin"]
 
         def _fmt(it):
             name, en, ru, who, show = it[:5]
             menu = " ✅" if show else ""
-            return f"/<code>{name}</code>{menu} — {ru} / {en}"
+            # No <code> wrapper so Telegram keeps it as a tappable /command.
+            return f"/{name}{menu} — {ru} / {en}"
 
         lines = ["<b>Commands</b>"]
         if user_cmds:
