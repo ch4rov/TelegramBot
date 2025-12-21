@@ -246,9 +246,10 @@ async def exit_mode(message: types.Message, state: FSMContext):
     try:
         await state.clear()
         await safe_reply(
+            message,
             "Video note mode disabled.",
             reply_markup=ReplyKeyboardRemove(),
-            disable_notification=True
+            disable_notification=True,
         )
         logger.info(f"User {message.from_user.id} exited video note mode")
     except Exception as e:
