@@ -1,0 +1,16 @@
+services:
+  telegrambot:
+    build:
+      context: .
+    container_name: telegrambot
+    restart: unless-stopped
+    # core/config.py expects /app/.env; we mount host .env
+    volumes:
+      - ./.env:/app/.env:ro
+      - ./data:/data
+    environment:
+      DB_TYPE: sqlite
+      DB_PATH: /data/bot.db
+    ports:
+      - "8088:8088"
+      - "8089:8089"

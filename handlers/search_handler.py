@@ -23,6 +23,7 @@ from services.platforms.platform_manager import download_content, is_valid_url
 import settings
 from services.url_cleaner import clean_url
 from services.odesli_service import get_links_by_url
+from core.caption_utils import wrap_tail_in_blockquote
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -300,7 +301,7 @@ def make_caption(meta: dict, display_url: str, links_page: str | None = None) ->
     if len(caption) > CAPTION_MAX_LEN:
         caption = caption[:CAPTION_MAX_LEN]
         caption = _safe_trim_escaped_html(caption)
-    return caption
+    return wrap_tail_in_blockquote(caption)
 
 
 def _extract_youtube_video_id(url: str) -> str | None:

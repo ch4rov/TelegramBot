@@ -1,0 +1,23 @@
+.git
+.gitignore
+__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+.env
+bot.db
+users.db
+*.sqlite
+*.sqlite3
+*.db
+
+# runtime folders
+/tempfiles/
+/downloads/
+/cloudflared/
+
+# logs
+*.log

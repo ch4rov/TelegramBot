@@ -16,7 +16,12 @@ class UserCookieState(StatesGroup):
     selecting_service = State()
     uploading_file = State()
 
-SERVICES = {"youtube": "YouTube", "tiktok": "TikTok", "vk": "VK"}
+SERVICES = {
+    "youtube": "YouTube",
+    "tiktok": "TikTok",
+    "instagram": "Instagram",
+    "vk": "VK",
+}
 
 @router.message(Command("addcookies"))
 async def cmd_addcookies(message: types.Message, i18n: LocalizationService, state: FSMContext):

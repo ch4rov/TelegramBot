@@ -15,6 +15,8 @@ from core.commands_updater import set_bot_commands
 from services.database.core import init_db
 from services.placeholder_service import ensure_placeholders
 from services.oauth_server import OAuthServer
+from services.database.backup import run_periodic_db_backup
+from core.error_reporter import ErrorReporter
 
 # Импорты мидлварей
 from middlewares.logger import LoggingMiddleware
@@ -23,6 +25,7 @@ from middlewares.antiflood import ThrottlingMiddleware
 from middlewares.registration import RegistrationMiddleware
 from middlewares.test_mode_guard import TestModeGuardMiddleware
 from middlewares.ban_guard import BanGuardMiddleware
+from middlewares.traceback_reporter import TracebackReporterMiddleware
 
 # === ИМПОРТЫ РОУТЕРОВ ===
 # 1. Админка
@@ -61,6 +64,27 @@ async def main():
         logger.error(f"Error updating bot commands: {e}")
 
     # Регистрация Middleware (порядок важен!)
+    # -1) Report any unexpected exception to admins
+    dp.update.middleware(TracebackReporterMiddleware(bot))
+
+    # Report unhandled exceptions from background tasks / event loop
+    reporter = ErrorReporter(bot)
+    try:
+        loop = asyncio.get_running_loop()
+
+        def _loop_exception_handler(loop, context):
+            exc = context.get("exception")
+            if not exc:
+                return
+            try:
+                asyncio.create_task(reporter.report(where="event_loop", exc=exc, extra=context.get("message")))
+            except Exception:
+                pass
+
+        loop.set_exception_handler(_loop_exception_handler)
+    except Exception:
+        pass
+
     # 0) Block random users in test mode
     dp.update.middleware(TestModeGuardMiddleware())
 
@@ -94,14 +118,54 @@ async def main():
     # OAuth callback server (aiohttp) for Spotify/Yandex
     oauth_server = OAuthServer(bot)
 
+    _db_backup_task: asyncio.Task | None = None
+
     async def _oauth_startup(*args, **kwargs):
         await oauth_server.start()
+
+    async def _backup_startup(*args, **kwargs):
+        nonlocal _db_backup_task
+        try:
+            _db_backup_task = asyncio.create_task(run_periodic_db_backup(bot))
+
+            def _report_task_exception(t: asyncio.Task):
+                try:
+                    ex = t.exception()
+                except asyncio.CancelledError:
+                    return
+                except Exception:
+                    return
+                if ex:
+                    try:
+                        asyncio.create_task(reporter.report(where="db_backup_task", exc=ex))
+                    except Exception:
+                        pass
+
+            _db_backup_task.add_done_callback(_report_task_exception)
+        except Exception as e:
+            logger.error(f"Failed to start DB backup task: {e}")
+            try:
+                await reporter.report(where="db_backup_startup", exc=e)
+            except Exception:
+                pass
 
     async def _oauth_shutdown(*args, **kwargs):
         await oauth_server.stop()
 
+    async def _backup_shutdown(*args, **kwargs):
+        nonlocal _db_backup_task
+        if _db_backup_task:
+            _db_backup_task.cancel()
+            try:
+                await _db_backup_task
+            except Exception:
+                pass
+            _db_backup_task = None
+
     dp.startup.register(_oauth_startup)
+    dp.startup.register(_backup_startup)
     dp.shutdown.register(_oauth_shutdown)
+    dp.shutdown.register(_backup_shutdown)
 
     # Запуск
     logger.info("Starting polling...")

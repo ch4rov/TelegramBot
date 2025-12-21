@@ -241,28 +241,6 @@ async def cmd_links(message: types.Message):
     )
 
 
-@user_router.message(Command("addcookies"))
-async def cmd_addcookies(message: types.Message):
-    """Add cookies command"""
-    try:
-        user = message.from_user
-        is_banned = await is_user_banned(user.id)
-        
-        if is_banned:
-            await safe_reply(message, "You are banned from using this bot.", disable_notification=True)
-            return
-        
-        text = (
-            "Cookies allow the bot to access restricted content.\n\n"
-            "This feature is under construction.\n"
-            "Supported platforms: YouTube, TikTok, VK, Instagram"
-        )
-        await safe_reply(message, text, disable_notification=True)
-        logger.info(f"User {user.id} used /addcookies")
-        await increment_request_count(user.id)
-    except Exception as e:
-        logger.error(f"Error in /addcookies: {e}")
-
 @user_router.message(Command("language"))
 async def cmd_language(message: types.Message):
     """Toggle language: /language"""

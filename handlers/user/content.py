@@ -24,6 +24,7 @@ from core.queue_manager import queue_manager
 from uuid import uuid4
 import math
 from core.tg_safe import safe_reply, safe_reply_html
+from core.caption_utils import wrap_tail_in_blockquote
 
 PLAYLIST_CACHE = {}
 LAST_STATUS_TIME = {} 
@@ -50,13 +51,13 @@ def make_caption(title_text, url, override=None, is_audio=False, request_by=None
         footer += f"\n{request_by}"
     
     if override:
-        return f"{html.escape(override)}\n\n{footer}"
+        return wrap_tail_in_blockquote(f"{html.escape(override)}\n\n{footer}")
     
     if not title_text:
         return footer
         
     safe_title = html.escape(title_text)
-    return f'<a href="{url}">{safe_title}</a>\n\n{footer}'
+    return wrap_tail_in_blockquote(f'<a href="{url}">{safe_title}</a>\n\n{footer}')
 
 def get_clip_keyboard(url: str):
     if "youtube.com" in url or "youtu.be" in url:

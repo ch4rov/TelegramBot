@@ -13,6 +13,7 @@ from aiogram.filters import Command, CommandObject
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from handlers.admin.filters import AdminFilter
 from services.database.repo import get_all_users
+from services.database.backup import send_db_backup
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -41,69 +42,6 @@ async def _run_git(args: list[str], cwd: str) -> tuple[int, str, str]:
 def _repo_root() -> str:
     return os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 
-
-def _get_tech_chat_id() -> int | None:
-    raw = (os.getenv("TECH_CHAT_ID") or "").strip()
-    if raw and raw.lstrip("-").isdigit():
-        try:
-            return int(raw)
-        except Exception:
-            return None
-    return None
-
-
-def _get_sqlite_db_path() -> str | None:
-    # Prefer config.DB_URL (sqlite+aiosqlite:////path)
-    try:
-        from core.config import config
-        db_url = getattr(config, "DB_URL", "") or ""
-        if db_url.startswith("sqlite+") and ":///" in db_url:
-            path = db_url.split(":///", 1)[1]
-            path = path.strip()
-            if path:
-                return path
-    except Exception:
-        pass
-
-    # Fallback to DB_PATH env
-    try:
-        db_path = (os.getenv("DB_PATH") or "").strip()
-        if db_path:
-            return db_path
-    except Exception:
-        pass
-    return None
-
-
-async def send_db_backup(bot, caption: str | None = None) -> bool:
-    """Send current sqlite DB file to TECH_CHAT_ID. Returns True on success."""
-    tech_chat_id = _get_tech_chat_id()
-    if not tech_chat_id:
-        return False
-
-    db_path = _get_sqlite_db_path()
-    if not db_path:
-        return False
-
-    if not os.path.isabs(db_path):
-        # treat as relative to repo root
-        db_path = os.path.join(_repo_root(), db_path)
-
-    if not os.path.exists(db_path):
-        return False
-
-    try:
-        from aiogram.types import FSInputFile
-        await bot.send_document(
-            tech_chat_id,
-            FSInputFile(db_path),
-            caption=caption or "💾 DB backup",
-            disable_notification=True,
-        )
-        return True
-    except Exception:
-        logger.exception("Failed to send DB backup")
-        return False
 
 # Время запуска бота
 BOT_START_TIME = time.time()
@@ -190,6 +128,7 @@ async def cmd_cmd(message: types.Message):
     except Exception as e:
         logger.error(f"Error in /cmd: {e}")
         await message.reply("Error building command list", disable_notification=True)
+
 
 def parse_time_to_seconds(time_str: str) -> int:
     """Парсит строку времени типа '5m', '1h', '1d' в секунды"""

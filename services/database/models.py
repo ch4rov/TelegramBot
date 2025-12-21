@@ -57,6 +57,22 @@ class GlobalCookies(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=func.now(), onupdate=func.now())
 
 
+class UserCookies(Base):
+    __tablename__ = "user_cookies"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    platform: Mapped[str] = mapped_column(String(50), index=True)
+    cookies_data: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "platform", name="uq_user_cookies_user_platform"),
+        Index("ix_user_cookies_user_platform", "user_id", "platform"),
+    )
+
+
 class MediaCache(Base):
     __tablename__ = "media_cache"
 

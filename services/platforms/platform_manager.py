@@ -7,13 +7,11 @@ import re
 import asyncio
 import yt_dlp
 from services.database.repo import get_user_cookie, get_global_cookie
-from core.config import config
 from services.odesli_service import get_links_by_url
 import subprocess
 import json
 
 logger = logging.getLogger(__name__)
-
 # URL patterns for different platforms
 URL_PATTERNS = {
     'youtube': r'(youtube\.com|youtu\.be)',
@@ -119,7 +117,7 @@ async def download_content(url, custom_opts=None, user_id=None):
         if "tiktok" in url:
             service = "tiktok"
         elif "instagram" in url:
-            service = "youtube"  # Instagram uses similar cookies
+            service = "instagram"
         elif "vk" in url:
             service = "vk"
         elif "twitch" in url:
@@ -164,29 +162,10 @@ async def download_content(url, custom_opts=None, user_id=None):
         base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
         installs_dir = os.path.join(base_dir, "core", "installs")
         local_ffmpeg = os.path.join(installs_dir, "ffmpeg.exe")
-        local_ffprobe = os.path.join(installs_dir, "ffprobe.exe")
-        if os.path.exists(local_ffmpeg) and os.path.exists(local_ffprobe):
-            ydl_opts['ffmpeg_location'] = installs_dir
-            ydl_opts['prefer_ffmpeg'] = True
-            os.environ["PATH"] = f"{installs_dir}{os.pathsep}" + os.environ.get("PATH", "")
+        if os.path.exists(local_ffmpeg):
+            ydl_opts["ffmpeg_location"] = local_ffmpeg
     except Exception:
         pass
-
-    # Default safer format for YouTube: prefer a single-file mp4 when possible
-    if re.search(URL_PATTERNS['youtube'], url) and 'format' not in ydl_opts:
-        ydl_opts['format'] = 'best[ext=mp4]/best'
-
-    # If original link was Yandex Music and caller didn't override: download audio.
-    if is_yandex_music and not (custom_opts and ('format' in custom_opts or 'postprocessors' in custom_opts)):
-        ydl_opts['format'] = 'bestaudio/best'
-        ydl_opts['writethumbnail'] = True
-        ydl_opts['postprocessors'] = [
-            {
-                'key': 'FFmpegExtractAudio',
-                'preferredcodec': 'mp3',
-                'preferredquality': '192',
-            }
-        ]
 
     # TikTok Photos: encourage extractor to download the carousel items.
     if url and re.search(URL_PATTERNS.get('tiktok', r'$^'), url) and "/photo/" in url and 'format' not in ydl_opts:
@@ -215,12 +194,14 @@ async def download_content(url, custom_opts=None, user_id=None):
     error = None
     files = []
 
-    # Retry with fallback formats for cases where merging is required
-    attempts = [
+    # Base attempts: retry with fallback formats for cases where merging is required
+    base_attempts = [
         dict(ydl_opts),
         {**ydl_opts, 'format': 'best[ext=mp4]/best'},
         {**ydl_opts, 'format': 'best'},
     ]
+
+    attempts = base_attempts
 
     def _find_ffprobe() -> str | None:
         try:

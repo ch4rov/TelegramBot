@@ -3,7 +3,7 @@ from sqlalchemy import delete
 from sqlalchemy.dialects.sqlite import insert
 from datetime import datetime, timedelta
 from services.database.core import session_maker 
-from services.database.models import User, SystemSettings, GlobalCookies, MediaCache, MediaCacheBypass, UserRequest, UserOAuthToken, OAuthState, UserPreference
+from services.database.models import User, SystemSettings, GlobalCookies, UserCookies, MediaCache, MediaCacheBypass, UserRequest, UserOAuthToken, OAuthState, UserPreference
 
 # === РАБОТА С ПОЛЬЗОВАТЕЛЯМИ ===
 
@@ -618,29 +618,52 @@ async def save_user_cookie(user_id: int, platform: str, cookie_data: str):
     """Сохраняет куки пользователя для конкретной платформы."""
     async with session_maker() as session:
         async with session.begin():
+            plat = (platform or "").lower().strip()
+
+            # Backward-compatible columns for existing platforms
             user = await session.execute(select(User).where(User.id == user_id))
             u = user.scalar_one_or_none()
             if u:
-                if platform.lower() == "youtube":
+                if plat == "youtube":
                     u.cookies_youtube = cookie_data
-                elif platform.lower() == "tiktok":
+                elif plat == "tiktok":
                     u.cookies_tiktok = cookie_data
-                elif platform.lower() == "vk":
+                elif plat == "vk":
                     u.cookies_vk = cookie_data
+
+            # Generic per-user cookies table (supports additional platforms)
+            existing = await session.execute(
+                select(UserCookies).where(UserCookies.user_id == user_id, UserCookies.platform == plat)
+            )
+            row = existing.scalar_one_or_none()
+            if row:
+                row.cookies_data = cookie_data
+                row.updated_at = datetime.now()
+            else:
+                session.add(UserCookies(user_id=user_id, platform=plat, cookies_data=cookie_data))
 
 async def get_user_cookie(user_id: int, platform: str) -> str | None:
     """Получает куки пользователя для конкретной платформы."""
-    user = await get_user(user_id)
-    if not user:
-        return None
-    
-    if platform.lower() == "youtube":
-        return user.cookies_youtube
-    elif platform.lower() == "tiktok":
-        return user.cookies_tiktok
-    elif platform.lower() == "vk":
-        return user.cookies_vk
-    return None
+    plat = (platform or "").lower().strip()
+
+    # Prefer existing columns for legacy platforms if present.
+    if plat in ("youtube", "tiktok", "vk"):
+        user = await get_user(user_id)
+        if user:
+            if plat == "youtube" and user.cookies_youtube:
+                return user.cookies_youtube
+            if plat == "tiktok" and user.cookies_tiktok:
+                return user.cookies_tiktok
+            if plat == "vk" and user.cookies_vk:
+                return user.cookies_vk
+
+    # Fallback to generic table.
+    async with session_maker() as session:
+        result = await session.execute(
+            select(UserCookies).where(UserCookies.user_id == user_id, UserCookies.platform == plat)
+        )
+        row = result.scalar_one_or_none()
+        return row.cookies_data if row else None
 
 # === УПРАВЛЕНИЕ ГЛОБАЛЬНЫМИ КУКИ ===
 
