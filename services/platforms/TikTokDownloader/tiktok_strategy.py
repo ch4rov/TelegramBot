@@ -57,9 +57,128 @@ class TikTokStrategy(CommonDownloader):
                 # Другие ошибки API
                 if result.get('code') != 0:
                     msg = result.get('msg', 'Unknown error')
+                    msg_l = str(msg).lower()
+                    if any(s in msg_l for s in ("private", "not found", "removed", "deleted", "unavailable", "forbidden")):
+                        return None, None, "Video unavailable", None
                     return None, None, f"TikTok API Error: {msg}", None
                 
                 data_obj = result.get('data', {})
+
+                title = data_obj.get('title', 'TikTok')
+                author = (data_obj.get('author') or {}).get('nickname', 'TikTok') if isinstance(data_obj.get('author'), dict) else 'TikTok'
+
+                # Photo carousel (slideshow)
+                want_photos = "/photo/" in (self.url or "")
+                images = data_obj.get('images') or data_obj.get('image') or data_obj.get('imgs')
+                if isinstance(images, list) and images:
+                    want_photos = True
+
+                def _extract_audio_url(obj: dict) -> str | None:
+                    """Best-effort extraction of TikTok sound URL from tikwm payload."""
+                    if not isinstance(obj, dict):
+                        return None
+
+                    # Common top-level candidates
+                    for key in ("music", "music_info", "musicInfo", "music_url", "musicUrl", "audio", "audio_url", "audioUrl"):
+                        v = obj.get(key)
+                        if isinstance(v, str) and v.startswith("http"):
+                            return v
+                        if isinstance(v, dict):
+                            for k2 in ("play_url", "playUrl", "play", "url", "download", "link"):
+                                vv = v.get(k2)
+                                if isinstance(vv, str) and vv.startswith("http"):
+                                    return vv
+                            # sometimes nested again
+                            inner = v.get("music") or v.get("audio")
+                            if isinstance(inner, dict):
+                                for k3 in ("play_url", "play", "url", "download"):
+                                    vv = inner.get(k3)
+                                    if isinstance(vv, str) and vv.startswith("http"):
+                                        return vv
+
+                    # Last resort: scan shallow dict for any http audio-ish URL
+                    for k, v in obj.items():
+                        if not isinstance(v, str) or not v.startswith("http"):
+                            continue
+                        vl = v.lower()
+                        if any(ext in vl for ext in (".mp3", ".m4a", ".aac", ".opus", ".ogg")):
+                            return v
+                    return None
+
+                if want_photos and isinstance(images, list) and images:
+                    if not os.path.exists(self.download_path):
+                        os.makedirs(self.download_path)
+
+                    async def _extract_img_url(obj):
+                        if isinstance(obj, str):
+                            return obj
+                        if isinstance(obj, dict):
+                            for key in ("url", "src", "download", "play"):
+                                v = obj.get(key)
+                                if isinstance(v, str) and v:
+                                    return v
+                            v = obj.get("url_list")
+                            if isinstance(v, list) and v and isinstance(v[0], str):
+                                return v[0]
+                        return None
+
+                    files: list[str] = []
+                    async with aiohttp.ClientSession() as session:
+                        for idx, img in enumerate(images[:35], start=1):
+                            img_url = await _extract_img_url(img)
+                            if not img_url:
+                                continue
+                            if not img_url.startswith("http"):
+                                img_url = f"https://www.tikwm.com{img_url}" if img_url.startswith("/") else img_url
+                            out_path = os.path.join(self.download_path, f"slide_{idx:02d}.jpg")
+                            try:
+                                async with session.get(img_url, timeout=30) as img_resp:
+                                    if img_resp.status != 200:
+                                        continue
+                                    with open(out_path, 'wb') as f:
+                                        f.write(await img_resp.read())
+                                files.append(out_path)
+                            except Exception:
+                                continue
+
+                        # Best-effort: download attached sound (if present)
+                        audio_url = _extract_audio_url(data_obj)
+                        if audio_url and isinstance(audio_url, str):
+                            # Some payloads return relative paths
+                            if not audio_url.startswith("http"):
+                                audio_url = f"https://www.tikwm.com{audio_url}" if audio_url.startswith("/") else audio_url
+
+                            audio_ext = ".mp3"
+                            try:
+                                lower = audio_url.lower().split("?", 1)[0]
+                                for ext in (".mp3", ".m4a", ".aac", ".opus", ".ogg"):
+                                    if lower.endswith(ext):
+                                        audio_ext = ext
+                                        break
+                            except Exception:
+                                audio_ext = ".mp3"
+
+                            audio_path = os.path.join(self.download_path, f"sound{audio_ext}")
+                            try:
+                                async with session.get(audio_url, timeout=30) as a_resp:
+                                    if a_resp.status == 200:
+                                        with open(audio_path, "wb") as f:
+                                            f.write(await a_resp.read())
+                                        files.append(audio_path)
+                            except Exception:
+                                pass
+
+                    if files:
+                        final_meta = {
+                            'title': title,
+                            'artist': author,
+                            'uploader': author,
+                            'track': title,
+                        }
+                        return files, self.download_path, None, final_meta
+
+                    return None, None, "Video unavailable", None
+
                 video_url = data_obj.get('hdplay') or data_obj.get('play')
                 
                 # --- ФИКС ОТНОСИТЕЛЬНОЙ ССЫЛКИ ---
@@ -69,10 +188,7 @@ class TikTokStrategy(CommonDownloader):
                 # --- ПРОВЕРКА НА УДАЛЕННОЕ ВИДЕО ---
                 if not video_url:
                     print("❌ [TikTok API] Ссылка пуста (Видео удалено или приватно).")
-                    return None, None, "Video not found or deleted", None
-
-                title = data_obj.get('title', 'TikTok Video')
-                author = data_obj.get('author', {}).get('nickname', 'TikTok User')
+                    return None, None, "Video unavailable", None
                 
                 print(f"✅ [TikTok API] Ссылка OK. Скачиваю...")
                 

@@ -1,13 +1,13 @@
 # -*- coding: utf-8 -*-
 import logging
-import json
 import html
+import settings
 from aiogram import types, F
 from aiogram.filters import Command, CommandObject
 from aiogram.fsm.context import FSMContext
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-from aiogram.types import BufferedInputFile
 from handlers.user.router import user_router
+from core.tg_safe import safe_reply, safe_reply_html
 from services.database.repo import (
     is_user_banned,
     increment_request_count,
@@ -22,10 +22,8 @@ from services.database.repo import (
 from services.lastfm_service import get_user_recent_track
 from core.config import config
 from services.oauth_server import build_spotify_authorize_url
-from services.spotify_service import spotify_dump_all, spotify_get_json
 from services.database.repo import get_user_pref_bool, set_user_pref_bool
-from services.placeholder_service import upload_temp_audio_placeholder
-from services.inline_presets import store_inline_preset
+from services.spotify_service import spotify_get_json
 
 logger = logging.getLogger(__name__)
 
@@ -34,16 +32,55 @@ def _h(s: object) -> str:
     return html.escape("" if s is None else str(s))
 
 
-def _login_kb() -> InlineKeyboardMarkup:
+async def _spotify_profile_label(user_id: int) -> str | None:
+    tok = None
+    try:
+        tok = await get_user_oauth_token(user_id, "spotify")
+    except Exception:
+        tok = None
+    if not tok:
+        return None
+    try:
+        me = await spotify_get_json(user_id, "https://api.spotify.com/v1/me")
+        data = me.get("data") if isinstance(me, dict) else None
+        if isinstance(data, dict):
+            return (data.get("display_name") or data.get("id") or "").strip() or None
+    except Exception:
+        return "connected"
+    return "connected"
+
+
+async def _login_kb(user_id: int, lang: str) -> InlineKeyboardMarkup:
+    lf = None
+    try:
+        lf = await get_lastfm_username(user_id)
+    except Exception:
+        lf = None
+
+    sp_label = await _spotify_profile_label(user_id)
+
+    try:
+        if isinstance(sp_label, str) and len(sp_label) > 22:
+            sp_label = sp_label[:22] + "…"
+    except Exception:
+        pass
+    try:
+        if isinstance(lf, str) and len(lf) > 22:
+            lf = lf[:22] + "…"
+    except Exception:
+        pass
+
+    if lang == "ru":
+        sp_text = "🎧 Spotify" + (f": {sp_label}" if sp_label else ": —")
+        lf_text = "🎵 Last.fm" + (f": {lf}" if lf else ": —")
+    else:
+        sp_text = "🎧 Spotify" + (f": {sp_label}" if sp_label else ": —")
+        lf_text = "🎵 Last.fm" + (f": {lf}" if lf else ": —")
+
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [
-                InlineKeyboardButton(text="🎧 Spotify", callback_data="login:spotify"),
-            ],
-            [
-                InlineKeyboardButton(text="📎 Статус", callback_data="login:status"),
-                InlineKeyboardButton(text="🔌 Отключить", callback_data="login:unlink"),
-            ],
+            [InlineKeyboardButton(text=sp_text, callback_data="login:spotify")],
+            [InlineKeyboardButton(text=lf_text, callback_data="login:lastfm")],
         ]
     )
 
@@ -55,7 +92,7 @@ async def cmd_login(message: types.Message, command: CommandObject):
         is_banned = await is_user_banned(user.id)
         
         if is_banned:
-            await message.answer("You are banned from using this bot.", disable_notification=True)
+            await safe_reply(message, "You are banned from using this bot.", disable_notification=True)
             return
         
         # Получаем язык пользователя
@@ -64,86 +101,75 @@ async def cmd_login(message: types.Message, command: CommandObject):
         lang = await get_user_language(user.id)
         
         if not command.args:
-            lastfm_user = await get_lastfm_username(user.id)
             text = []
             if lang == "ru":
-                text.append("<b>Подключения</b>")
+                text.append("<b>Подключение аккаунтов</b>")
                 text.append("")
-                text.append(f"Last.fm: <code>{lastfm_user or '—'}</code>")
+                text.append("Здесь ты подключаешь Spotify и Last.fm, чтобы бот мог показывать/отправлять музыку в inline.")
                 text.append("")
-                text.append("Last.fm: <code>/login USERNAME</code>")
-                text.append("Spotify: кнопкой ниже")
-                text.append("")
-                text.append("Команды: <code>/now</code> (сейчас играет), <code>/recent</code> (последние 3)")
+                text.append("Как использовать Spotify: открой inline, просто упомяни бота без текста.")
+                text.append("Last.fm: отправь <code>/login USERNAME</code>.")
             else:
-                text.append("<b>Connections</b>")
+                text.append("<b>Connect accounts</b>")
                 text.append("")
-                text.append(f"Last.fm: <code>{lastfm_user or '—'}</code>")
+                text.append("Connect Spotify and/or Last.fm so the bot can show/share music in inline mode.")
                 text.append("")
-                text.append("Last.fm: <code>/login USERNAME</code>")
-                text.append("Spotify: use the button")
-                text.append("")
-                text.append("Commands: <code>/now</code> (now playing), <code>/recent</code> (last 3)")
+                text.append("Spotify usage: open inline and mention the bot with empty query.")
+                text.append("Last.fm: send <code>/login USERNAME</code>.")
 
-            await message.answer("\n".join(text), reply_markup=_login_kb(), disable_notification=True, parse_mode="HTML")
+            kb = await _login_kb(user.id, lang)
+            await safe_reply_html(message, "\n".join(text), reply_markup=kb, disable_notification=True)
             return
         
         lastfm_username = command.args.strip()
         await set_lastfm_username(user.id, lastfm_username)
         
         text = i18n.get("login_success", lang, username=lastfm_username)
-        await message.answer(text, disable_notification=True)
+        await safe_reply(message, text, disable_notification=True)
         logger.info(f"User {user.id} linked Last.fm account: {lastfm_username}")
         await increment_request_count(user.id)
     except Exception as e:
         logger.error(f"Error in /login: {e}")
-        await message.answer("Error processing command", disable_notification=True)
+        await safe_reply(message, "Error processing command", disable_notification=True)
 
 
 @user_router.callback_query(F.data.startswith("login:"))
 async def cb_login(call: types.CallbackQuery):
     user = call.from_user
     from services.database.repo import get_user_language
-    from services.localization import i18n
 
     lang = await get_user_language(user.id)
     action = (call.data or "").split(":", 1)[1]
 
-    if action == "status":
-        sp = await get_user_oauth_token(user.id, "spotify")
+    if action == "lastfm":
         lf = await get_lastfm_username(user.id)
-        lines = []
-        lines.append("<b>Статус</b>" if lang == "ru" else "<b>Status</b>")
-        lines.append("")
-        lines.append(f"Last.fm: <code>{lf or '—'}</code>")
-        lines.append(f"Spotify: {'✅' if sp else '—'}")
         await call.answer("OK")
-        await call.message.answer("\n".join(lines), disable_notification=True, parse_mode="HTML")
-        return
-
-    if action == "unlink":
-        kb = InlineKeyboardMarkup(
-            inline_keyboard=[
-                [
-                    InlineKeyboardButton(text="Spotify", callback_data="login:unlink:spotify"),
-                ]
-            ]
-        )
-        await call.answer("OK")
-        await call.message.answer("Что отключить?" if lang == "ru" else "What to unlink?", reply_markup=kb)
-        return
-
-    if action.startswith("unlink:"):
-        svc = action.split(":", 1)[1]
-        await delete_user_oauth_token(user.id, svc)
-        await call.answer("OK")
-        await call.message.answer(f"✅ Unlinked {svc}")
+        if lf:
+            await safe_reply_html(call.message, (f"✅ Last.fm подключен: <code>{_h(lf)}</code>" if lang == "ru" else f"✅ Last.fm connected: <code>{_h(lf)}</code>"), disable_notification=True)
+        else:
+            await safe_reply_html(call.message, ("Отправь <code>/login USERNAME</code>, чтобы подключить Last.fm." if lang == "ru" else "Send <code>/login USERNAME</code> to connect Last.fm."), disable_notification=True)
         return
 
     if action in ("spotify",):
+        # If connected: show profile and quick usage hint.
+        tok = await get_user_oauth_token(user.id, "spotify")
+        if tok:
+            label = await _spotify_profile_label(user.id)
+            await call.answer("OK")
+            await safe_reply_html(
+                call.message,
+                (
+                    f"✅ Spotify подключен: <code>{_h(label or 'connected')}</code>\n\nИспользование: открой inline и упомяни бота без текста."
+                    if lang == "ru"
+                    else f"✅ Spotify connected: <code>{_h(label or 'connected')}</code>\n\nUsage: open inline and mention the bot with empty query."
+                ),
+                disable_notification=True,
+            )
+            return
+
         if not config.PUBLIC_BASE_URL:
             await call.answer("OK")
-            await call.message.answer(
+            await safe_reply(
                 (
                     "Не задан PUBLIC_BASE_URL/TEST_PUBLIC_BASE_URL (адрес туннеля).\n"
                     "Сначала подними Cloudflare Tunnel/ngrok и запиши URL в .env.\n"
@@ -160,7 +186,7 @@ async def cb_login(call: types.CallbackQuery):
         if svc == "spotify":
             if not config.SPOTIFY_CLIENT_ID or not config.SPOTIFY_CLIENT_SECRET:
                 await call.answer("OK")
-                await call.message.answer(
+                await safe_reply(
                     ("Не заданы SPOTIFY_CLIENT_ID/SPOTIFY_CLIENT_SECRET (или TEST_* в тесте)." if lang == "ru" else "Missing SPOTIFY_CLIENT_ID/SPOTIFY_CLIENT_SECRET (or TEST_* in test mode)."),
                     disable_notification=True,
                 )
@@ -168,7 +194,7 @@ async def cb_login(call: types.CallbackQuery):
             state = await create_oauth_state(user.id, "spotify")
             url = build_spotify_authorize_url(state)
             await call.answer("OK")
-            await call.message.answer(
+            await safe_reply(
                 (
                     "Открой ссылку и разреши доступ:\n" + url + "\n\n"
                     f"Redirect URI в Spotify должен быть: {config.PUBLIC_BASE_URL}/oauth/spotify/callback"
@@ -180,136 +206,12 @@ async def cb_login(call: types.CallbackQuery):
             return
 
 
-
-@user_router.message(Command("now"))
-async def cmd_now(message: types.Message):
-    """Now playing (best-effort): Spotify if connected, otherwise Last.fm recent."""
-    user = message.from_user
-    if await is_user_banned(user.id):
-        await message.answer("You are banned from using this bot.", disable_notification=True)
-        return
-
-    from services.database.repo import get_user_language
-    lang = await get_user_language(user.id)
-
-    # Prefer Spotify if connected
-    tracks: list[dict] = []
-    try:
-        tok = await get_user_oauth_token(user.id, "spotify")
-    except Exception:
-        tok = None
-
-    if tok:
-        now = await spotify_get_json(user.id, "https://api.spotify.com/v1/me/player/currently-playing")
-        recent = await spotify_get_json(user.id, "https://api.spotify.com/v1/me/player/recently-played", params={"limit": 3})
-
-        def _track_from_item(item: dict, emoji: str) -> dict | None:
-            if not isinstance(item, dict):
-                return None
-            artists = item.get("artists")
-            artist = " & ".join([a.get("name") for a in artists if isinstance(a, dict) and a.get("name")]) if isinstance(artists, list) else None
-            name = item.get("name")
-            url = (item.get("external_urls") or {}).get("spotify") if isinstance(item.get("external_urls"), dict) else None
-            if not (name and url):
-                return None
-            return {"artist": artist or "Spotify", "title": str(name), "url": str(url), "emoji": emoji}
-
-        # Now playing
-        try:
-            if isinstance(now, dict) and now.get("status") == 200 and isinstance(now.get("data"), dict):
-                item = now["data"].get("item")
-                t = _track_from_item(item, "▶️")
-                if t:
-                    tracks.append(t)
-        except Exception:
-            pass
-
-        # Recent (fill up to 3)
-        try:
-            data = recent.get("data") if isinstance(recent, dict) else None
-            items = data.get("items") if isinstance(data, dict) else None
-            if isinstance(items, list):
-                for it in items:
-                    tr = it.get("track") if isinstance(it, dict) else None
-                    t = _track_from_item(tr, "🎧")
-                    if not t:
-                        continue
-                    if any(x.get("url") == t.get("url") for x in tracks):
-                        continue
-                    tracks.append(t)
-                    if len(tracks) >= 3:
-                        break
-        except Exception:
-            pass
-
-    if tracks:
-        preset_items: list[dict] = []
-        for t in tracks[:3]:
-            file_id = None
-            msg_id = None
-            chat_id = None
-            try:
-                file_id, msg_id, chat_id = await upload_temp_audio_placeholder(
-                    title=(f"{t.get('emoji', '🎧')} {t.get('title', '')}".strip() if t.get('title') else None),
-                    performer=t.get("artist"),
-                )
-                if file_id:
-                    preset_items.append({"url": t.get("url"), "file_id": file_id})
-            finally:
-                if chat_id and msg_id:
-                    try:
-                        from core.loader import bot
-                        await bot.delete_message(chat_id, msg_id)
-                    except Exception:
-                        pass
-
-        if preset_items:
-            token = store_inline_preset(user.id, preset_items, ttl_seconds=180)
-            kb = InlineKeyboardMarkup(
-                inline_keyboard=[
-                    [
-                        InlineKeyboardButton(
-                            text=("📤 Отправить трек" if lang == "ru" else "📤 Share track"),
-                            switch_inline_query=f"sp:{token}",
-                        )
-                    ]
-                ]
-            )
-            await message.answer(
-                ("Выбери трек в inline-списке:" if lang == "ru" else "Pick a track in the inline list:"),
-                reply_markup=kb,
-                disable_notification=True,
-            )
-            return
-
-    # Fallback to Last.fm (text only)
-    lfm = await get_lastfm_username(user.id)
-    if not lfm:
-        await message.answer(
-            ("Подключи Spotify или Last.fm через /login" if lang == "ru" else "Connect Spotify or Last.fm via /login"),
-            disable_notification=True,
-        )
-        return
-
-    try:
-        t = await get_user_recent_track(lfm)
-    except Exception:
-        t = None
-
-    if not t:
-        await message.answer("Ничего не найдено" if lang == "ru" else "Nothing found", disable_notification=True)
-        return
-
-    title = t.get("query") or "Now playing"
-    await message.answer(f"🎵 {title}", disable_notification=True)
-
-
 @user_router.message(Command("links"))
 async def cmd_links(message: types.Message):
     """Toggle per-user links in inline-audio captions."""
     user = message.from_user
     if await is_user_banned(user.id):
-        await message.answer("You are banned from using this bot.", disable_notification=True)
+        await message.reply("You are banned from using this bot.", disable_notification=True)
         return
 
     from services.database.repo import get_user_language
@@ -326,259 +228,17 @@ async def cmd_links(message: types.Message):
     elif arg in ("off", "0", "false", "no", "n"):
         new_value = False
     else:
-        await message.answer(
+        await message.reply(
             ("Использование: /links [on|off]" if lang == "ru" else "Usage: /links [on|off]"),
             disable_notification=True,
         )
         return
 
     await set_user_pref_bool(user.id, "links", new_value)
-    await message.answer(
+    await message.reply(
         ("🔗 Ссылки: включены" if new_value else "🔗 Ссылки: выключены") if lang == "ru" else ("🔗 Links: ON" if new_value else "🔗 Links: OFF"),
         disable_notification=True,
     )
-
-
-@user_router.message(Command("recent"))
-async def cmd_recent(message: types.Message):
-    """Last 3 tracks (best-effort): Spotify if connected, otherwise Last.fm (single track)."""
-    user = message.from_user
-    if await is_user_banned(user.id):
-        await message.answer("You are banned from using this bot.", disable_notification=True)
-        return
-
-    from services.database.repo import get_user_language
-    lang = await get_user_language(user.id)
-    # Prefer Spotify if connected
-    tracks: list[dict] = []
-    try:
-        tok = await get_user_oauth_token(user.id, "spotify")
-    except Exception:
-        tok = None
-
-    if tok:
-        recent = await spotify_get_json(user.id, "https://api.spotify.com/v1/me/player/recently-played", params={"limit": 3})
-
-        def _track_from_item(item: dict) -> dict | None:
-            if not isinstance(item, dict):
-                return None
-            artists = item.get("artists")
-            artist = " & ".join([a.get("name") for a in artists if isinstance(a, dict) and a.get("name")]) if isinstance(artists, list) else None
-            name = item.get("name")
-            url = (item.get("external_urls") or {}).get("spotify") if isinstance(item.get("external_urls"), dict) else None
-            if not (name and url):
-                return None
-            return {"artist": artist or "Spotify", "title": str(name), "url": str(url), "emoji": "🎧"}
-
-        try:
-            data = recent.get("data") if isinstance(recent, dict) else None
-            items = data.get("items") if isinstance(data, dict) else None
-            if isinstance(items, list):
-                for it in items:
-                    tr = it.get("track") if isinstance(it, dict) else None
-                    t = _track_from_item(tr)
-                    if t:
-                        tracks.append(t)
-        except Exception:
-            pass
-
-    if tracks:
-        preset_items: list[dict] = []
-        for t in tracks[:3]:
-            file_id = None
-            msg_id = None
-            chat_id = None
-            try:
-                file_id, msg_id, chat_id = await upload_temp_audio_placeholder(
-                    title=(f"{t.get('emoji', '🎧')} {t.get('title', '')}".strip() if t.get('title') else None),
-                    performer=t.get("artist"),
-                )
-                if file_id:
-                    preset_items.append({"url": t.get("url"), "file_id": file_id})
-            finally:
-                if chat_id and msg_id:
-                    try:
-                        from core.loader import bot
-                        await bot.delete_message(chat_id, msg_id)
-                    except Exception:
-                        pass
-
-        if preset_items:
-            token = store_inline_preset(user.id, preset_items, ttl_seconds=180)
-            kb = InlineKeyboardMarkup(
-                inline_keyboard=[
-                    [
-                        InlineKeyboardButton(
-                            text=("📤 Отправить (3)" if lang == "ru" else "📤 Share (3)"),
-                            switch_inline_query=f"sp:{token}",
-                        )
-                    ]
-                ]
-            )
-            await message.answer(
-                ("Выбери трек в inline-списке:" if lang == "ru" else "Pick a track in the inline list:"),
-                reply_markup=kb,
-                disable_notification=True,
-            )
-            return
-
-    # Fallback to Last.fm (text only)
-    lfm = await get_lastfm_username(user.id)
-    if not lfm:
-        await message.answer(
-            ("Подключи Spotify или Last.fm через /login" if lang == "ru" else "Connect Spotify or Last.fm via /login"),
-            disable_notification=True,
-        )
-        return
-
-    try:
-        t = await get_user_recent_track(lfm)
-    except Exception:
-        t = None
-
-    if not t:
-        await message.answer("Ничего не найдено" if lang == "ru" else "Nothing found", disable_notification=True)
-        return
-
-    await message.answer(f"🎵 {t.get('query')}", disable_notification=True)
-
-
-@user_router.message(Command("apis"))
-async def cmd_apis(message: types.Message):
-    """Dump raw API responses for Spotify/Last.fm (separately).
-
-    Sends JSON as documents to avoid Telegram message length limits.
-    """
-    user = message.from_user
-    if await is_user_banned(user.id):
-        await message.answer("You are banned from using this bot.", disable_notification=True)
-        return
-
-    from services.database.repo import get_user_language
-    lang = await get_user_language(user.id)
-
-    await message.answer(
-        "Собираю данные API (Spotify/Last.fm)…" if lang == "ru" else "Fetching API data (Spotify/Last.fm)…",
-        disable_notification=True,
-    )
-
-    # Spotify
-    try:
-        sp = await spotify_dump_all(user.id)
-    except Exception as e:
-        logger.exception("/apis spotify failed")
-        sp = {"error": "spotify_exception", "detail": str(e)}
-
-    # Last.fm (raw)
-    try:
-        lfm_user = await get_lastfm_username(user.id)
-        if not lfm_user:
-            lf = {"error": "lastfm_not_connected"}
-        else:
-            # Existing helper returns parsed single track; keep it as-is for now.
-            lf = {"user": lfm_user, "recent_track": await get_user_recent_track(lfm_user)}
-    except Exception as e:
-        logger.exception("/apis lastfm failed")
-        lf = {"error": "lastfm_exception", "detail": str(e)}
-
-    bundles = [
-        ("spotify.json", sp),
-        ("lastfm.json", lf),
-    ]
-
-    for filename, payload in bundles:
-        try:
-            data = json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
-            await message.answer_document(
-                BufferedInputFile(data, filename=filename),
-                caption=filename,
-                disable_notification=True,
-            )
-        except Exception:
-            logger.exception("Failed sending %s", filename)
-
-
-@user_router.message(Command("api"))
-async def cmd_api(message: types.Message):
-    """Human-readable API status (RU only)."""
-    user = message.from_user
-    if await is_user_banned(user.id):
-        await message.answer("Вы заблокированы.", disable_notification=True)
-        return
-
-    # Status flags
-    sp_tok = await get_user_oauth_token(user.id, "spotify")
-    lf_user = await get_lastfm_username(user.id)
-
-    lines: list[str] = []
-    lines.append("<b>API статус</b>")
-    lines.append("")
-    lines.append(f"Spotify: {'✅' if sp_tok else '—'}")
-    lines.append(f"Last.fm: <code>{_h(lf_user or '—')}</code>")
-    lines.append("")
-
-    # Spotify details
-    if sp_tok:
-        try:
-            sp = await spotify_dump_all(user.id)
-        except Exception as e:
-            sp = {"error": str(e)}
-
-        me = (sp.get("me") or {}).get("data") if isinstance(sp, dict) else None
-        if isinstance(me, dict) and me.get("id"):
-            lines.append("<b>Spotify</b>")
-            lines.append(f"Профиль: <code>{_h(me.get('display_name') or me.get('id'))}</code>")
-        else:
-            lines.append("<b>Spotify</b>")
-            err = (sp.get("me") or {}).get("data") if isinstance(sp, dict) else None
-            lines.append(f"Профиль: ошибка/нет доступа ({_h(err)})")
-
-        now = (sp.get("currently_playing") or {}).get("data") if isinstance(sp, dict) else None
-        if isinstance(now, dict) and now.get("item"):
-            item = now.get("item") or {}
-            artists = ", ".join([a.get("name", "") for a in (item.get("artists") or []) if isinstance(a, dict)])
-            title = item.get("name")
-            is_playing = now.get("is_playing")
-            lines.append(f"Сейчас играет: <code>{_h(artists)} - {_h(title)}</code> {'▶️' if is_playing else ''}")
-        elif isinstance((sp.get("currently_playing") or {}).get("status"), int) and (sp.get("currently_playing") or {}).get("status") == 204:
-            lines.append("Сейчас играет: —")
-        else:
-            lines.append("Сейчас играет: —")
-
-        recent = (sp.get("recently_played") or {}).get("data") if isinstance(sp, dict) else None
-        if isinstance(recent, dict) and isinstance(recent.get("items"), list):
-            items = recent.get("items")[:3]
-            rec_lines = []
-            for it in items:
-                tr = (it or {}).get("track") or {}
-                artists = ", ".join([a.get("name", "") for a in (tr.get("artists") or []) if isinstance(a, dict)])
-                title = tr.get("name")
-                if artists or title:
-                    rec_lines.append(f"- {_h(artists)} - {_h(title)}")
-            if rec_lines:
-                lines.append("Последние 3:")
-                lines.extend(rec_lines)
-
-        lines.append("")
-
-    # Last.fm details
-    if lf_user:
-        try:
-            t = await get_user_recent_track(lf_user)
-        except Exception:
-            t = None
-
-        lines.append("<b>Last.fm</b>")
-        if t and t.get("query"):
-            np = " (сейчас играет)" if t.get("now_playing") else ""
-            lines.append(f"Последний трек: <code>{_h(t.get('query'))}</code>{np}")
-        else:
-            lines.append("Последний трек: —")
-
-    lines.append("")
-    lines.append("Сырые ответы: /apis")
-
-    await message.answer("\n".join(lines), disable_notification=True, parse_mode="HTML")
 
 
 @user_router.message(Command("addcookies"))
@@ -589,7 +249,7 @@ async def cmd_addcookies(message: types.Message):
         is_banned = await is_user_banned(user.id)
         
         if is_banned:
-            await message.answer("You are banned from using this bot.", disable_notification=True)
+            await safe_reply(message, "You are banned from using this bot.", disable_notification=True)
             return
         
         text = (
@@ -597,7 +257,7 @@ async def cmd_addcookies(message: types.Message):
             "This feature is under construction.\n"
             "Supported platforms: YouTube, TikTok, VK, Instagram"
         )
-        await message.answer(text, disable_notification=True)
+        await safe_reply(message, text, disable_notification=True)
         logger.info(f"User {user.id} used /addcookies")
         await increment_request_count(user.id)
     except Exception as e:
@@ -611,7 +271,7 @@ async def cmd_language(message: types.Message):
         is_banned = await is_user_banned(user.id)
         
         if is_banned:
-            await message.answer("You are banned from using this bot.", disable_notification=True)
+            await safe_reply(message, "You are banned from using this bot.", disable_notification=True)
             return
         
         from services.localization import i18n
@@ -629,9 +289,9 @@ async def cmd_language(message: types.Message):
         else:
             text = "✅ Язык установлен на русский"
         
-        await message.answer(text, disable_notification=True)
+        await safe_reply(message, text, disable_notification=True)
         logger.info(f"User {user.id} switched language from {current_lang} to {new_lang}")
         await increment_request_count(user.id)
     except Exception as e:
         logger.error(f"Error in /language: {e}")
-        await message.answer("Error processing command", disable_notification=True)
+        await safe_reply(message, "Error processing command", disable_notification=True)

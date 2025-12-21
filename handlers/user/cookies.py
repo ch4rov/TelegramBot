@@ -7,6 +7,7 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from services.localization import LocalizationService
 from services.database.repo import save_user_cookie, increment_request_count
+from core.tg_safe import safe_reply
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -32,7 +33,7 @@ async def cmd_addcookies(message: types.Message, i18n: LocalizationService, stat
         kb.button(text="Cancel", callback_data="usr_cook:cancel")
         kb.adjust(2)
         
-        await message.answer(text, reply_markup=kb.as_markup(), disable_notification=True)
+        await safe_reply(message, text, reply_markup=kb.as_markup(), disable_notification=True)
         await state.set_state(UserCookieState.selecting_service)
         logger.info(f"User {user.id} started adding cookies")
     except Exception as e:
@@ -77,15 +78,15 @@ async def handle_file_upload(message: types.Message, state: FSMContext):
 
         # Basic validation
         if len(content) < 50 or "Netscape" not in content:
-            await message.answer("Invalid cookies file format", disable_notification=True)
+            await safe_reply(message, "Invalid cookies file format", disable_notification=True)
             logger.warning(f"User {user.id} uploaded invalid cookies file")
             return
 
         # Save cookies
         await save_user_cookie(user.id, service, content)
-        await message.answer(f"Cookies for {SERVICES.get(service, service)} saved!", disable_notification=True)
+        await safe_reply(message, f"Cookies for {SERVICES.get(service, service)} saved!", disable_notification=True)
         await state.clear()
         logger.info(f"User {user.id} uploaded cookies for {service}")
     except Exception as e:
         logger.error(f"Error in handle_file_upload: {e}")
-        await message.answer("Error saving cookies", disable_notification=True)
+        await safe_reply(message, "Error saving cookies", disable_notification=True)

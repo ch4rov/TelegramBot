@@ -14,6 +14,7 @@ from services.platforms.platform_manager import download_content
 from services.odesli_service import get_links_by_url
 from handlers.search_handler import make_caption
 from services.database.repo import get_cached_media, upsert_cached_media, log_user_request
+from core.tg_safe import safe_reply
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -74,11 +75,11 @@ async def yt_text_search(message: types.Message):
         results = await search_youtube(query, limit=5)
     except Exception as e:
         logger.exception("YouTube search failed")
-        await message.answer(f"❌ {html.escape(str(e))}")
+        await safe_reply(message, f"❌ {html.escape(str(e))}")
         return
 
     if not results:
-        await message.answer("❌ Nothing found")
+        await safe_reply(message, "❌ Nothing found")
         return
 
     buttons: list[list[InlineKeyboardButton]] = []
@@ -92,10 +93,10 @@ async def yt_text_search(message: types.Message):
         buttons.append([InlineKeyboardButton(text=text[:64], callback_data=f"ytpick:{vid}")])
 
     if not buttons:
-        await message.answer("❌ Nothing found")
+        await safe_reply(message, "❌ Nothing found")
         return
 
-    await message.answer(
+    await safe_reply(
         f"🔍 {query}",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
     )
@@ -117,7 +118,10 @@ async def yt_pick_download(cb: types.CallbackQuery):
         )
         try:
             caption = make_caption({"title": cached.title or "Media"}, src_url, links_page=None)
-            await cb.message.answer_audio(cached.file_id, caption=caption, parse_mode="HTML", reply_markup=kb)
+            try:
+                await cb.message.reply_audio(cached.file_id, caption=caption, parse_mode="HTML", reply_markup=kb)
+            except Exception:
+                await cb.message.answer_audio(cached.file_id, caption=caption, parse_mode="HTML", reply_markup=kb)
             try:
                 await log_user_request(
                     cb.from_user.id,
@@ -138,7 +142,7 @@ async def yt_pick_download(cb: types.CallbackQuery):
     status = None
     pulsar = None
     try:
-        status = await cb.message.answer("⏳")
+        status = await safe_reply(cb.message, "⏳")
     except Exception:
         pass
 
@@ -170,7 +174,7 @@ async def yt_pick_download(cb: types.CallbackQuery):
                 await status.delete()
         except Exception:
             pass
-        await cb.message.answer(f"❌ {html.escape(str(error))}")
+        await safe_reply(cb.message, f"❌ {html.escape(str(error))}")
         if folder:
             shutil.rmtree(folder, ignore_errors=True)
         return
@@ -197,12 +201,20 @@ async def yt_pick_download(cb: types.CallbackQuery):
             inline_keyboard=[[InlineKeyboardButton(text="🎬 Скачать клип", callback_data=f"ytm_clip:{src_url}")]]
         )
 
-        sent = await cb.message.answer_audio(
-            FSInputFile(target),
-            caption=caption,
-            parse_mode="HTML",
-            reply_markup=kb,
-        )
+        try:
+            sent = await cb.message.reply_audio(
+                FSInputFile(target),
+                caption=caption,
+                parse_mode="HTML",
+                reply_markup=kb,
+            )
+        except Exception:
+            sent = await cb.message.answer_audio(
+                FSInputFile(target),
+                caption=caption,
+                parse_mode="HTML",
+                reply_markup=kb,
+            )
 
         try:
             if sent and sent.audio:
@@ -221,7 +233,7 @@ async def yt_pick_download(cb: types.CallbackQuery):
         except Exception:
             pass
     except Exception as e:
-        await cb.message.answer(f"⚠️ {html.escape(str(e))}")
+        await safe_reply(cb.message, f"⚠️ {html.escape(str(e))}")
     finally:
         if pulsar:
             await pulsar.stop()

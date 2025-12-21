@@ -74,7 +74,7 @@ BOT_COMMANDS_LIST = [
     ("start", "Main Menu", "Главное меню", "user", False),
     ("language", "Toggle Language", "Переключить язык", "user", True),
     ("login", "Last.fm Connect", "Подключить Last.fm", "user", False),
-    ("api", "API Status", "API статус", "user", False),
+    ("links", "Toggle Links", "Переключить ссылки", "user", False),
     ("videomessage", "Video Note Mode", "Режим видеозаписи", "user", True),
     ("addcookies", "Add Cookies", "Добавить куки", "user", False),
     
@@ -91,4 +91,5 @@ BOT_COMMANDS_LIST = [
     ("edituser", "Edit user/group", "Редактировать пользователя/группу", "admin", True),
     ("update", "Update bot commands", "Обновить команды", "admin", True),
     ("savedb", "Save DB to tech chat", "Сохранить БД в тех-чат", "admin", True),
+    ("cmd", "All Commands", "Все команды", "admin", False),
 ]

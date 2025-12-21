@@ -42,6 +42,28 @@ async def download_content(url, custom_opts=None, user_id=None):
     """Download content from URL using yt-dlp"""
     original_url = url
 
+    # TikTok: prefer API-based strategy (fixes yt-dlp "Unsupported URL" for /photo/)
+    try:
+        if url and re.search(URL_PATTERNS.get('tiktok', r'$^'), url):
+            from services.platforms.TikTokDownloader.tiktok_strategy import TikTokStrategy
+
+            strategy = TikTokStrategy(url)
+            files, folder, error, meta = await strategy.download()
+            if files:
+                return files, folder, None, meta or {}
+            if error:
+                # For hard failures (private/deleted/unsupported), return early.
+                if str(error).strip().lower() in (
+                    "video unavailable",
+                    "api busy (too many requests)",
+                    "tiktok api busy (too many requests)",
+                ):
+                    return [], folder, error, meta or {}
+                # Otherwise fall back to yt-dlp below.
+    except Exception:
+        # Fallback to yt-dlp below.
+        pass
+
     is_yandex_music = bool(url and re.search(r'music\.yandex\.(ru|by|kz|com)', url))
     is_apple_music = bool(url and re.search(r'music\.apple\.com', url))
     is_yandex_disk = bool(url and re.search(r'(disk\.yandex\.ru|yadi\.sk)', url))
@@ -169,6 +191,19 @@ async def download_content(url, custom_opts=None, user_id=None):
     # TikTok Photos: encourage extractor to download the carousel items.
     if url and re.search(URL_PATTERNS.get('tiktok', r'$^'), url) and "/photo/" in url and 'format' not in ydl_opts:
         ydl_opts['format'] = 'best'
+        # Try Android-like extractor settings (helps carousel extraction)
+        ydl_opts['http_headers'] = {
+            'User-Agent': 'com.zhiliaoapp.musically/2022600030 (Linux; U; Android 7.1.2; es_ES; SM-G988N; Build/NRD90M; Cronet/41.0.2272.118)',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        }
+        ydl_opts['extractor_args'] = {
+            'tiktok': {
+                'api_hostname': 'api16-normal-c-useast1a.tiktokv.com',
+                'app_version': '20.2.2',
+                'manifest_app_version': '2022600030',
+            }
+        }
+        ydl_opts['socket_timeout'] = max(int(ydl_opts.get('socket_timeout') or 0), 30)
 
     if cookie_path:
         ydl_opts['cookiefile'] = cookie_path
@@ -342,6 +377,26 @@ async def download_content(url, custom_opts=None, user_id=None):
         except Exception as e:
             error = str(e)
             logger.error(f"Error downloading {url} (attempt {idx}): {error}")
+
+    # TikTok: normalize common private/blocked/deleted errors.
+    if error and original_url and re.search(URL_PATTERNS.get('tiktok', r'$^'), original_url):
+        lower = str(error).lower()
+        if any(s in lower for s in ("private", "unavailable", "not available", "not found", "removed", "deleted", "forbidden", "403", "ip address is blocked", "blocked from accessing")):
+            error = "Video unavailable"
+
+        # TikTok Photos: yt-dlp may not support /photo/ on some environments.
+        if "unsupported url" in lower:
+            try:
+                from services.platforms.TikTokDownloader.tiktok_strategy import TikTokStrategy
+
+                strategy = TikTokStrategy(original_url)
+                s_files, s_folder, s_error, s_meta = await strategy.download()
+                if s_files:
+                    return s_files, s_folder, None, s_meta or {}
+                if s_error and str(s_error).strip().lower() in ("video unavailable", "api busy (too many requests)"):
+                    return [], s_folder, "Video unavailable", s_meta or {}
+            except Exception:
+                pass
     
     # Collect downloaded files
     if os.path.exists(save_path):

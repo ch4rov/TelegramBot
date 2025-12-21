@@ -77,6 +77,28 @@ class MediaCache(Base):
     )
 
 
+class MediaCacheBypass(Base):
+    """Marks a (user_id, url, media_type) cache binding as bypassed.
+
+    Cache lookups should ignore media_cache rows when there's a bypass record
+    newer than the cache row's last_used_at. This keeps media_cache rows intact
+    for admin tools like /edituser.
+    """
+
+    __tablename__ = "media_cache_bypass"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    url: Mapped[str] = mapped_column(Text)
+    media_type: Mapped[str] = mapped_column(String(16))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now(), index=True)
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "url", "media_type", name="uq_media_cache_bypass_user_url_type"),
+        Index("ix_media_cache_bypass_user_type", "user_id", "media_type"),
+    )
+
+
 class UserRequest(Base):
     __tablename__ = "user_requests"
 

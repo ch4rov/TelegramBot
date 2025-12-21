@@ -7,6 +7,7 @@ import re
 import datetime
 import asyncio
 import subprocess
+import settings
 from aiogram import Router, types, F
 from aiogram.filters import Command, CommandObject
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
@@ -154,11 +155,41 @@ async def cmd_status(message: types.Message):
             + f"💾 Cache files: {cache_count}\n"
             + f"🐍 Python: {sys.version.split()[0]}"
         )
-        await message.answer(text, disable_notification=True)
+        await message.reply(text, disable_notification=True)
         logger.info(f"Admin {message.from_user.id} used /status")
     except Exception as e:
         logger.error(f"Error in /status: {e}")
-        await message.answer("Error getting bot status", disable_notification=True)
+        await message.reply("Error getting bot status", disable_notification=True)
+
+
+@router.message(Command("cmd"))
+async def cmd_cmd(message: types.Message):
+    """List all bot commands known to settings.BOT_COMMANDS_LIST (including hidden)."""
+    try:
+        items = list(getattr(settings, "BOT_COMMANDS_LIST", []) or [])
+
+        user_cmds = [x for x in items if len(x) >= 5 and x[3] == "user"]
+        admin_cmds = [x for x in items if len(x) >= 5 and x[3] == "admin"]
+
+        def _fmt(it):
+            name, en, ru, who, show = it[:5]
+            menu = " ✅" if show else ""
+            return f"/<code>{name}</code>{menu} — {ru} / {en}"
+
+        lines = ["<b>Commands</b>"]
+        if user_cmds:
+            lines.append("\n<b>User</b>")
+            lines.extend(_fmt(it) for it in user_cmds)
+        if admin_cmds:
+            lines.append("\n<b>Admin</b>")
+            lines.extend(_fmt(it) for it in admin_cmds)
+
+        lines.append("\n✅ = shown in menu")
+
+        await message.reply("\n".join(lines), disable_notification=True, parse_mode="HTML")
+    except Exception as e:
+        logger.error(f"Error in /cmd: {e}")
+        await message.reply("Error building command list", disable_notification=True)
 
 def parse_time_to_seconds(time_str: str) -> int:
     """Парсит строку времени типа '5m', '1h', '1d' в секунды"""
@@ -178,9 +209,111 @@ def parse_time_to_seconds(time_str: str) -> int:
     
     return value * multipliers.get(unit, 1)
 
+
+_TEMPFILES_DIR = "tempfiles"
+_TEMPFILES_PRESERVE_TOP = {"_inline_placeholders"}
+
+
+def _is_in_preserved_tempfiles_dir(path: str) -> bool:
+    """Returns True if path is inside a preserved top-level dir under tempfiles."""
+    try:
+        rel = os.path.relpath(path, _TEMPFILES_DIR)
+        rel_norm = rel.replace("\\", "/")
+        top = rel_norm.split("/", 1)[0]
+        return top in _TEMPFILES_PRESERVE_TOP
+    except Exception:
+        return False
+
+
+def _clear_tempfiles_all() -> int:
+    """Delete everything in tempfiles except preserved dirs. Returns deleted file count."""
+    deleted = 0
+    if not os.path.exists(_TEMPFILES_DIR):
+        return 0
+
+    import shutil
+
+    for name in os.listdir(_TEMPFILES_DIR):
+        if name in _TEMPFILES_PRESERVE_TOP:
+            continue
+        p = os.path.join(_TEMPFILES_DIR, name)
+        try:
+            if os.path.isfile(p):
+                os.remove(p)
+                deleted += 1
+            elif os.path.isdir(p):
+                # Count files inside for reporting (best-effort)
+                try:
+                    for root, _, files in os.walk(p):
+                        deleted += len(files)
+                except Exception:
+                    pass
+                shutil.rmtree(p, ignore_errors=True)
+        except Exception:
+            pass
+
+    # Ensure base dir exists
+    try:
+        os.makedirs(_TEMPFILES_DIR, exist_ok=True)
+        for keep in _TEMPFILES_PRESERVE_TOP:
+            os.makedirs(os.path.join(_TEMPFILES_DIR, keep), exist_ok=True)
+    except Exception:
+        pass
+    return deleted
+
+
+def _clear_tempfiles_older_than(seconds: int) -> int:
+    """Delete files under tempfiles older than seconds (recursive), preserving placeholder dir."""
+    deleted = 0
+    if not seconds or seconds <= 0:
+        return 0
+    if not os.path.exists(_TEMPFILES_DIR):
+        return 0
+
+    now = time.time()
+
+    # Remove old files
+    for root, _, files in os.walk(_TEMPFILES_DIR):
+        if _is_in_preserved_tempfiles_dir(root):
+            continue
+        for filename in files:
+            fp = os.path.join(root, filename)
+            try:
+                if _is_in_preserved_tempfiles_dir(fp):
+                    continue
+                file_age = now - os.path.getmtime(fp)
+                if file_age > seconds:
+                    os.remove(fp)
+                    deleted += 1
+            except Exception:
+                pass
+
+    # Prune empty directories (bottom-up), but never remove preserved tops
+    try:
+        for root, dirs, _ in os.walk(_TEMPFILES_DIR, topdown=False):
+            for d in dirs:
+                dp = os.path.join(root, d)
+                if _is_in_preserved_tempfiles_dir(dp):
+                    continue
+                try:
+                    if os.path.isdir(dp) and not os.listdir(dp):
+                        os.rmdir(dp)
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+    return deleted
+
 @router.message(Command("clearcache"))
 async def cmd_clearcache(message: types.Message, command: CommandObject):
-    """Clear cache with time argument: /clearcache [5m|1h|1d|all]"""
+    """Invalidate (bypass) DB media cache bindings.
+
+    This does NOT delete rows from media_cache (so /edituser history stays available).
+    It only makes the bot ignore cached URL→file_id bindings until the URL is downloaded again.
+
+    Usage: /clearcache [5m|1h|1d|all]
+    """
     try:
         if not command.args:
             kb = InlineKeyboardMarkup(inline_keyboard=[
@@ -193,43 +326,26 @@ async def cmd_clearcache(message: types.Message, command: CommandObject):
                     InlineKeyboardButton(text="Весь кеш", callback_data="cache_all"),
                 ]
             ])
-            await message.answer("Выберите время удаления кеша file_id:", reply_markup=kb, disable_notification=True)
+            await message.answer("Выберите, какой кеш URL→file_id сбросить:", reply_markup=kb, disable_notification=True)
             return
         
         time_arg = command.args.strip()
         
         if time_arg == "all":
-            if os.path.exists("tempfiles"):
-                import shutil
-                shutil.rmtree("tempfiles")
-                os.makedirs("tempfiles", exist_ok=True)
-                await message.answer("✅ Весь file_id кеш удален", disable_notification=True)
-                logger.info(f"Admin {message.from_user.id} cleared all cache")
-            else:
-                await message.answer("❌ Нет кеша для удаления", disable_notification=True)
+            from services.database.repo import bypass_media_cache_all
+            targeted = await bypass_media_cache_all()
+            await message.answer(f"✅ DB кеш сброшен (помечено записей: {targeted})", disable_notification=True)
+            logger.info(f"Admin {message.from_user.id} bypassed all DB media cache (targeted {targeted})")
         else:
             seconds = parse_time_to_seconds(time_arg)
             if not seconds:
                 await message.answer("❌ Неверный формат времени. Используйте: 5m, 1h, 1d или all", disable_notification=True)
                 return
-            
-            now = time.time()
-            deleted_count = 0
-            
-            if os.path.exists("tempfiles"):
-                for filename in os.listdir("tempfiles"):
-                    filepath = os.path.join("tempfiles", filename)
-                    if os.path.isfile(filepath):
-                        file_age = now - os.path.getmtime(filepath)
-                        if file_age > seconds:
-                            try:
-                                os.remove(filepath)
-                                deleted_count += 1
-                            except:
-                                pass
-            
-            await message.answer(f"✅ Удалено файлов: {deleted_count}", disable_notification=True)
-            logger.info(f"Admin {message.from_user.id} cleared cache older than {time_arg}")
+
+            from services.database.repo import bypass_media_cache_recent
+            targeted = await bypass_media_cache_recent(int(seconds))
+            await message.answer(f"✅ DB кеш сброшен (помечено записей: {targeted})", disable_notification=True)
+            logger.info(f"Admin {message.from_user.id} bypassed DB media cache recent window={time_arg} (targeted {targeted})")
     except Exception as e:
         logger.error(f"Error in /clearcache: {e}")
         await message.answer("❌ Ошибка при удалении кеша", disable_notification=True)
@@ -241,34 +357,17 @@ async def handle_cache_button(query: types.CallbackQuery):
         action = query.data.replace("cache_", "")
         
         if action == "all":
-            if os.path.exists("tempfiles"):
-                import shutil
-                shutil.rmtree("tempfiles")
-                os.makedirs("tempfiles", exist_ok=True)
-                await query.answer("✅ Весь file_id кеш удален", show_alert=True)
-                logger.info(f"Admin {query.from_user.id} cleared all cache via button")
-            else:
-                await query.answer("❌ Нет кеша", show_alert=True)
+            from services.database.repo import bypass_media_cache_all
+            targeted = await bypass_media_cache_all()
+            await query.answer(f"✅ DB кеш сброшен (записей: {targeted})", show_alert=True)
+            logger.info(f"Admin {query.from_user.id} bypassed all DB media cache via button (targeted {targeted})")
         else:
             seconds = parse_time_to_seconds(action)
             if seconds:
-                now = time.time()
-                deleted_count = 0
-                
-                if os.path.exists("tempfiles"):
-                    for filename in os.listdir("tempfiles"):
-                        filepath = os.path.join("tempfiles", filename)
-                        if os.path.isfile(filepath):
-                            file_age = now - os.path.getmtime(filepath)
-                            if file_age > seconds:
-                                try:
-                                    os.remove(filepath)
-                                    deleted_count += 1
-                                except:
-                                    pass
-                
-                await query.answer(f"✅ Удалено: {deleted_count} файлов", show_alert=True)
-                logger.info(f"Admin {query.from_user.id} cleared cache older than {action} via button")
+                from services.database.repo import bypass_media_cache_recent
+                targeted = await bypass_media_cache_recent(int(seconds))
+                await query.answer(f"✅ DB кеш сброшен (записей: {targeted})", show_alert=True)
+                logger.info(f"Admin {query.from_user.id} bypassed DB media cache via button window={action} (targeted {targeted})")
         
         await query.message.delete()
     except Exception as e:

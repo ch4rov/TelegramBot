@@ -12,6 +12,10 @@ user_router = Router()
 async def check_access_and_update(user: types.User, message: types.Message | None = None):
     """Checks if user is allowed to use bot and updates their info"""
     try:
+        # Telegram system account (channel post forwarding in linked groups)
+        if getattr(user, "id", None) == 777000:
+            return False, False, False, "en"
+
         user_id = user.id
         username = user.username or ""
         full_name = user.full_name or "Unknown"
@@ -31,7 +35,7 @@ async def check_access_and_update(user: types.User, message: types.Message | Non
         # Check if banned
         if db_user.is_banned:
             if message:
-                await message.answer(
+                await message.reply(
                     f"Access Denied\nReason: {db_user.ban_reason}",
                     disable_notification=True
                 )
@@ -41,7 +45,7 @@ async def check_access_and_update(user: types.User, message: types.Message | Non
         # Check maintenance mode
         if config.USE_LOCAL_SERVER and user_id not in config.ADMIN_IDS:
             if message:
-                await message.answer("Maintenance mode active", disable_notification=True)
+                await message.reply("Maintenance mode active", disable_notification=True)
             return False, False, False, db_user.language
 
         return True, False, False, db_user.language
@@ -49,5 +53,5 @@ async def check_access_and_update(user: types.User, message: types.Message | Non
     except Exception as e:
         logger.error(f"Error in check_access_and_update: {e}")
         if message:
-            await message.answer("Error processing request", disable_notification=True)
+            await message.reply("Error processing request", disable_notification=True)
         return False, False, False, "en"

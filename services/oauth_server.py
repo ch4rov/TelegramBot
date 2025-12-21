@@ -7,7 +7,7 @@ from urllib.parse import urlencode
 from aiohttp import web, ClientSession
 
 from core.config import config
-from services.database.repo import consume_oauth_state, upsert_user_oauth_token
+from services.database.repo import consume_oauth_state, upsert_user_oauth_token, get_basic_user_stats
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +35,7 @@ class OAuthServer:
         self._app: web.Application | None = None
         self._runner: web.AppRunner | None = None
         self._site: web.TCPSite | None = None
+        self._started_at = datetime.now()
 
     async def start(self) -> None:
         if not config.PUBLIC_BASE_URL:
@@ -47,6 +48,7 @@ class OAuthServer:
         app = web.Application()
         app.router.add_get("/", self._index)
         app.router.add_get("/health", self._health)
+        app.router.add_get("/status", self._status)
         app.router.add_get("/oauth/spotify/callback", self._spotify_callback)
 
         runner = web.AppRunner(app)
@@ -89,6 +91,48 @@ class OAuthServer:
     <iframe src=\"https://www.youtube.com/embed/iGRFB_voPXw?autoplay=1&mute=0&playsinline=1\" title=\"А че это вы здесь делаете,а?\" allow=\"accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share\" referrerpolicy=\"strict-origin-when-cross-origin\" allowfullscreen></iframe>
 </body>
 </html>"""
+        return web.Response(text=html, status=200, content_type="text/html")
+
+    async def _status(self, request: web.Request) -> web.Response:
+        try:
+            stats = await get_basic_user_stats()
+        except Exception:
+            stats = {"total": 0, "active": 0, "banned": 0, "request_count": 0}
+
+        delta = datetime.now() - self._started_at
+        uptime_s = int(delta.total_seconds())
+        days = uptime_s // 86400
+        hours = (uptime_s % 86400) // 3600
+        mins = (uptime_s % 3600) // 60
+        uptime = f"{days}d {hours}h {mins}m" if days else f"{hours}h {mins}m"
+
+        html = f"""<!doctype html>
+<html lang=\"en\">
+<head>
+    <meta charset=\"utf-8\" />
+    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />
+    <title>Status</title>
+    <style>
+        body {{ font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; }}
+        h1 {{ margin: 0 0 12px; }}
+        .grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }}
+        .card {{ border: 1px solid #ddd; border-radius: 10px; padding: 14px; }}
+        .k {{ color: #666; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }}
+        .v {{ font-size: 22px; margin-top: 6px; }}
+    </style>
+</head>
+<body>
+    <h1>Status</h1>
+    <div class=\"grid\">
+        <div class=\"card\"><div class=\"k\">Uptime</div><div class=\"v\">{uptime}</div></div>
+        <div class=\"card\"><div class=\"k\">Users</div><div class=\"v\">{stats.get('total', 0)}</div></div>
+        <div class=\"card\"><div class=\"k\">Active</div><div class=\"v\">{stats.get('active', 0)}</div></div>
+        <div class=\"card\"><div class=\"k\">Banned</div><div class=\"v\">{stats.get('banned', 0)}</div></div>
+        <div class=\"card\"><div class=\"k\">Commands Processed</div><div class=\"v\">{stats.get('request_count', 0)}</div></div>
+    </div>
+</body>
+</html>"""
+
         return web.Response(text=html, status=200, content_type="text/html")
 
 

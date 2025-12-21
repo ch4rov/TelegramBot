@@ -44,6 +44,10 @@ class RegistrationMiddleware(BaseMiddleware):
 
         try:
             if user:
+                # Telegram system account (often appears as author for channel-posts in linked groups)
+                if getattr(user, "id", None) == 777000:
+                    return await handler(event, data)
+
                 full_name = _safe_str(getattr(user, "full_name", None)) or "Unknown"
                 username = _safe_str(getattr(user, "username", None))
                 # Don't overwrite DB language on every update; respect /language and manual choice.

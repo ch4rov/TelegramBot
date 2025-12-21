@@ -42,14 +42,21 @@ def _users_kb(page: int, max_page: int) -> InlineKeyboardMarkup:
 
 
 def _render_users_page(all_users: list, page: int, page_size: int = 20) -> tuple[str, InlineKeyboardMarkup]:
-    groups = [u for u in all_users if getattr(u, "id", 0) < 0 and getattr(u, "id", 0) != 777000]
-    users_list = [u for u in all_users if getattr(u, "id", 0) > 0]
+    # Exclude Telegram system account
+    filtered = [u for u in (all_users or []) if getattr(u, "id", 0) != 777000]
 
-    total = len(all_users)
-    groups_count = len(groups)
-    users_count = len(users_list)
+    groups_count = sum(1 for u in filtered if getattr(u, "id", 0) < 0)
+    users_count = sum(1 for u in filtered if getattr(u, "id", 0) > 0)
+    total = len(filtered)
 
-    items: list[tuple[str, object]] = [("group", g) for g in groups] + [("user", u) for u in users_list]
+    def _fs(u) -> float:
+        dt = getattr(u, "first_seen", None)
+        try:
+            return float(dt.timestamp()) if dt else 0.0
+        except Exception:
+            return 0.0
+
+    items: list[object] = sorted(filtered, key=_fs, reverse=True)
     total_items = len(items)
     max_page = max(0, (total_items - 1) // page_size) if total_items else 0
     page = max(0, min(page, max_page))
@@ -66,22 +73,44 @@ def _render_users_page(all_users: list, page: int, page_size: int = 20) -> tuple
         lines.append("No users found.")
         return "\n".join(lines), _users_kb(0, 0)
 
-    for kind, obj in items[start:end]:
-        eid = getattr(obj, "id", 0)
+    # Build keyboard: navigation row + per-item open buttons
+    kb_rows = _users_kb(page, max_page).inline_keyboard
+
+    for obj in items[start:end]:
+        eid = int(getattr(obj, "id", 0) or 0)
         is_banned = bool(getattr(obj, "is_banned", False))
         status = "❌" if is_banned else "✅"
         username = (getattr(obj, "username", None) or "").strip()
         full_name = (getattr(obj, "full_name", None) or "").strip()
 
-        if kind == "group":
+        is_group = eid < 0
+        if is_group:
             title = full_name
             label = _cap(title, 42) or (f"@{_cap(username, 32)}" if username else "(no title)")
-            lines.append(f"👥 {status} {label} | <code>{eid}</code>")
+            emoji = "👥"
+            emoji_link = None
+            if username:
+                emoji_link = f"https://t.me/{username.lstrip('@')}"
         else:
+            name = _cap(full_name or "(no name)", 42)
             uname = f"@{username}" if username else "@"
-            lines.append(f"👤 {status} <code>{eid}</code> {uname}")
+            label = f"{name} ({uname})"
+            emoji = "👤"
+            emoji_link = f"tg://user?id={eid}"
 
-    return "\n".join(lines), _users_kb(page, max_page)
+        if emoji_link:
+            lines.append(f"<a href=\"{emoji_link}\">{emoji}</a> {status} {label} | <code>{eid}</code>")
+        else:
+            lines.append(f"{emoji} {status} {label} | <code>{eid}</code>")
+
+        # Button: open user/group if possible
+        if not is_group:
+            kb_rows.append([InlineKeyboardButton(text=f"👤 { _cap(full_name or str(eid), 30) }", url=f"tg://user?id={eid}")])
+        else:
+            if username:
+                kb_rows.append([InlineKeyboardButton(text=f"👥 { _cap(full_name or username, 30) }", url=f"https://t.me/{username.lstrip('@')}")])
+
+    return "\n".join(lines), InlineKeyboardMarkup(inline_keyboard=kb_rows)
 
 @router.message(Command("users"))
 async def cmd_users(message: types.Message):
@@ -91,16 +120,16 @@ async def cmd_users(message: types.Message):
         await increment_request_count(message.from_user.id)
         
         if not users:
-            await message.answer("No users found.", disable_notification=True)
+            await message.reply("No users found.", disable_notification=True)
             return
 
         text, kb = _render_users_page(users, page=0, page_size=20)
-        await message.answer(text, reply_markup=kb, disable_notification=True, disable_web_page_preview=True)
+        await message.reply(text, reply_markup=kb, disable_notification=True, disable_web_page_preview=True, parse_mode="HTML")
         
         logger.info(f"ADMIN: User {message.from_user.id} used /users command")
     except Exception as e:
         logger.error(f"Error in /users: {e}")
-        await message.answer("Error retrieving users.", disable_notification=True)
+        await message.reply("Error retrieving users.", disable_notification=True)
 
 
 @router.callback_query(F.data.startswith("users:page:"))
@@ -115,10 +144,10 @@ async def cb_users_page(call: types.CallbackQuery):
     text, kb = _render_users_page(users, page=page, page_size=20)
     await call.answer("OK")
     try:
-        await call.message.edit_text(text, reply_markup=kb, disable_web_page_preview=True)
+        await call.message.edit_text(text, reply_markup=kb, disable_web_page_preview=True, parse_mode="HTML")
     except Exception:
         try:
-            await call.message.answer(text, reply_markup=kb, disable_web_page_preview=True)
+            await call.message.reply(text, reply_markup=kb, disable_web_page_preview=True, parse_mode="HTML")
         except Exception:
             pass
 

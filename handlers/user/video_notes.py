@@ -3,6 +3,7 @@ import os
 import asyncio
 import logging
 import uuid
+from core.tg_safe import safe_reply
 import subprocess
 from aiogram import Router, types, F, Bot
 from aiogram.filters import Command
@@ -217,7 +218,7 @@ async def cmd_videomessage(message: types.Message, state: FSMContext):
         # Проверяем бан
         banned = await is_user_banned(user.id)
         if banned:
-            await message.answer("You are banned from using this bot.", disable_notification=True)
+            await safe_reply(message, "You are banned from using this bot.", disable_notification=True)
             return
         
         await increment_request_count(user.id)
@@ -226,7 +227,7 @@ async def cmd_videomessage(message: types.Message, state: FSMContext):
             keyboard=[[KeyboardButton(text="❌ Выход / Exit")]],
             resize_keyboard=True
         )
-        await message.answer(
+        await safe_reply(
             "🎥 <b>Video Note Mode</b>\n\nSend me any video and I'll convert it to a video note (square 640x640).\n\n"
             "Press ❌ Exit button to leave this mode.",
             reply_markup=kb,
@@ -243,7 +244,7 @@ async def exit_mode(message: types.Message, state: FSMContext):
     """Exit video mode"""
     try:
         await state.clear()
-        await message.answer(
+        await safe_reply(
             "Video note mode disabled.",
             reply_markup=ReplyKeyboardRemove(),
             disable_notification=True
@@ -260,7 +261,7 @@ async def process_video(message: types.Message, user_lang: str = "en"):
     current_action = ChatAction.UPLOAD_DOCUMENT
     pulse_task: asyncio.Task | None = None
     try:
-        status = await message.answer("⏳", disable_notification=True)
+        status = await safe_reply(message, "⏳", disable_notification=True)
 
         def _get_action():
             return current_action
@@ -270,7 +271,7 @@ async def process_video(message: types.Message, user_lang: str = "en"):
         # Bots can't download very large user-uploaded files via getFile (Telegram-side limit).
         try:
             if message.video and message.video.file_size and message.video.file_size > 20 * 1024 * 1024:
-                await message.answer(_t(user_lang, "too_big"), disable_notification=True)
+                await safe_reply(message, _t(user_lang, "too_big"), disable_notification=True)
                 try:
                     if status:
                         await status.delete()
@@ -350,7 +351,10 @@ async def process_video(message: types.Message, user_lang: str = "en"):
         if os.path.exists(output_path):
             # Stage: uploading video note to Telegram
             current_action = ChatAction.UPLOAD_VIDEO_NOTE
-            sent = await message.answer_video_note(FSInputFile(output_path), disable_notification=True)
+            try:
+                sent = await message.reply_video_note(FSInputFile(output_path), disable_notification=True)
+            except Exception:
+                sent = await message.answer_video_note(FSInputFile(output_path), disable_notification=True)
             os.remove(output_path)
             logger.info(f"User {message.from_user.id} converted video to video note")
 
@@ -377,7 +381,7 @@ async def process_video(message: types.Message, user_lang: str = "en"):
             except Exception:
                 pass
         else:
-            await message.answer("❌ Error converting video", disable_notification=True)
+            await safe_reply(message, "❌ Error converting video", disable_notification=True)
         
         if os.path.exists(input_path):
             os.remove(input_path)
@@ -397,10 +401,10 @@ async def process_video(message: types.Message, user_lang: str = "en"):
     except Exception as e:
         logger.exception("Error processing video")
         if isinstance(e, TelegramBadRequest) and "file is too big" in str(e).lower():
-            await message.answer(_t(user_lang, "too_big"), disable_notification=True, parse_mode=None)
+            await safe_reply(message, _t(user_lang, "too_big"), disable_notification=True, parse_mode=None)
         else:
             # Avoid HTML parsing errors from angle brackets in exception texts (bot default parse_mode is HTML).
-            await message.answer(_t(user_lang, "generic_error"), disable_notification=True, parse_mode=None)
+            await safe_reply(message, _t(user_lang, "generic_error"), disable_notification=True, parse_mode=None)
         try:
             if status:
                 await status.delete()

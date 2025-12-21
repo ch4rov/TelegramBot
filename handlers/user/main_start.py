@@ -12,45 +12,22 @@ logger = logging.getLogger(__name__)
 
 
 def build_commands_text(lang: str, user_id: int):
-    """Строит текст команд из BOT_COMMANDS_LIST"""
-    is_admin = user_id in ADMIN_IDS
-    
-    # Фильтруем команды по типу и флагу show_in_menu
-    user_commands = []
-    admin_commands = []
-    
-    for cmd_name, desc_en, desc_ru, cmd_type, show_in_menu in BOT_COMMANDS_LIST:
-        if not show_in_menu:
-            continue
-        
-        # Выбираем описание по языку
-        desc = desc_ru if lang == "ru" else desc_en
-            
-        if cmd_type == "user":
-            user_commands.append((cmd_name, desc))
-        elif cmd_type == "admin" and is_admin:
-            admin_commands.append((cmd_name, desc))
-    
-    # Строим текст
-    if lang == "en":
-        text = "**🔧 User Commands:**\n"
-    else:
-        text = "**🔧 Пользовательские команды:**\n"
-    
-    for cmd, desc in user_commands:
-        text += f"/{cmd} - {desc}\n"
-    
-    if admin_commands:
-        text += "\n"
-        if lang == "en":
-            text += "**⚙️ Admin Commands:**\n"
-        else:
-            text += "**⚙️ Администраторские команды:**\n"
-        
-        for cmd, desc in admin_commands:
-            text += f"/{cmd} - {desc}\n"
-    
-    return text.strip()
+    """UX: show only 4 commands in the start menu text."""
+    if lang == "ru":
+        return (
+            "**🔧 Команды:**\n"
+            "/start - Главное меню\n"
+            "/login - Подключения\n"
+            "/language - Язык\n"
+            "/videomessage - Видеосообщение"
+        )
+    return (
+        "**🔧 Commands:**\n"
+        "/start - Main Menu\n"
+        "/login - Connections\n"
+        "/language - Language\n"
+        "/videomessage - Video Note"
+    )
 
 
 async def get_start_message(name: str, lang: str, user_id: int):
@@ -125,7 +102,7 @@ async def cmd_start(message: types.Message):
             
             text = "👋 Hello! / Привет!\n\nPlease choose your language:\nПожалуйста, выберите язык:"
             
-            await message.answer(text, reply_markup=kb.as_markup(), disable_notification=True)
+            await message.reply(text, reply_markup=kb.as_markup(), disable_notification=True)
             logger.info(f"New user registered: {user.id} (@{user.username})")
             return
 
@@ -135,12 +112,12 @@ async def cmd_start(message: types.Message):
         
         full_text = await get_start_message(name, lang, user.id)
         
-        await message.answer(full_text, parse_mode="Markdown", disable_notification=True)
+        await message.reply(full_text, parse_mode="Markdown", disable_notification=True)
         logger.info(f"User {user.id} sent /start")
     
     except Exception as e:
         logger.error(f"Error in /start: {e}")
-        await message.answer("Error processing /start", disable_notification=True)
+        await message.reply("Error processing /start", disable_notification=True)
 
 
 @router.callback_query(F.data.startswith("set_lang:"))
@@ -163,7 +140,7 @@ async def callback_set_lang(callback: types.CallbackQuery):
         # Собираем полное сообщение
         full_text = await get_start_message(name, lang_code, user.id)
         
-        await callback.message.answer(full_text, parse_mode="Markdown", disable_notification=True)
+        await callback.message.reply(full_text, parse_mode="Markdown", disable_notification=True)
         
         logger.info(f"User {user.id} set language to {lang_code}")
     

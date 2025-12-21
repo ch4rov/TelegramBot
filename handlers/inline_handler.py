@@ -32,9 +32,11 @@ from services.database.repo import (
     get_user_pref_bool,
 )
 from services.lastfm_service import get_user_recent_track
+from services.spotify_service import spotify_get_json
 from services.search_service import search_music
 from services.odesli_service import get_links_by_url
-from services.inline_presets import get_inline_preset, get_inline_preset_item
+from services.inline_presets import get_inline_preset, get_inline_preset_item, store_inline_preset
+from services.placeholder_service import upload_temp_audio_placeholder
 
 router = Router()
 
@@ -156,7 +158,7 @@ async def inline_query_handler(query: types.InlineQuery):
             pass
         return
 
-    # 0. Presets (/now, /recent)
+    # 0. Presets (internal tokens)
     if text.lower().startswith("sp:"):
         token = text.split(":", 1)[1].strip()
         items = get_inline_preset(user_id, token)
@@ -181,9 +183,9 @@ async def inline_query_handler(query: types.InlineQuery):
                 InlineQueryResultArticle(
                     id="preset_expired",
                     title=("⏱ Истекло" if is_ru else "⏱ Expired"),
-                    description=("Повтори /now или /recent" if is_ru else "Run /now or /recent again"),
+                    description=("Открой inline заново" if is_ru else "Open inline again"),
                     input_message_content=InputTextMessageContent(
-                        message_text=("Повтори /now или /recent" if is_ru else "Run /now or /recent again")
+                        message_text=("Открой inline заново" if is_ru else "Open inline again")
                     ),
                 )
             )
@@ -253,6 +255,90 @@ async def inline_query_handler(query: types.InlineQuery):
             return
             
         search_query = text
+
+        # If empty query: offer Spotify now/recent directly via inline (no /now,/recent commands).
+        if not search_query:
+            try:
+                now = await spotify_get_json(user_id, "https://api.spotify.com/v1/me/player/currently-playing")
+                recent = await spotify_get_json(user_id, "https://api.spotify.com/v1/me/player/recently-played", params={"limit": 3})
+            except Exception:
+                now = None
+                recent = None
+
+            def _track_from_item(item: dict, emoji: str) -> dict | None:
+                if not isinstance(item, dict):
+                    return None
+                artists = item.get("artists")
+                artist = " & ".join([a.get("name") for a in artists if isinstance(a, dict) and a.get("name")]) if isinstance(artists, list) else None
+                name = item.get("name")
+                url = (item.get("external_urls") or {}).get("spotify") if isinstance(item.get("external_urls"), dict) else None
+                if not (name and url):
+                    return None
+                return {"artist": artist or "Spotify", "title": str(name), "url": str(url), "emoji": emoji}
+
+            tracks: list[dict] = []
+            try:
+                if isinstance(now, dict) and now.get("status") == 200 and isinstance(now.get("data"), dict):
+                    t = _track_from_item(now["data"].get("item"), "▶️")
+                    if t:
+                        tracks.append(t)
+            except Exception:
+                pass
+
+            try:
+                if isinstance(recent, dict) and recent.get("status") == 200 and isinstance(recent.get("data"), dict):
+                    items = recent["data"].get("items")
+                    if isinstance(items, list):
+                        for it in items:
+                            tr = it.get("track") if isinstance(it, dict) else None
+                            t = _track_from_item(tr, "🎧")
+                            if not t:
+                                continue
+                            if any(x.get("url") == t.get("url") for x in tracks):
+                                continue
+                            tracks.append(t)
+                            if len(tracks) >= 3:
+                                break
+            except Exception:
+                pass
+
+            if tracks:
+                preset_items: list[dict] = []
+                for t in tracks[:3]:
+                    msg_id = None
+                    chat_id = None
+                    try:
+                        file_id, msg_id, chat_id = await upload_temp_audio_placeholder(
+                            title=(f"{t.get('emoji', '🎧')} {t.get('title', '')}".strip() if t.get('title') else "🎧"),
+                            performer=t.get("artist"),
+                        )
+                        if file_id:
+                            preset_items.append({"url": t.get("url"), "file_id": file_id})
+                    finally:
+                        if chat_id and msg_id:
+                            try:
+                                await bot.delete_message(chat_id, msg_id)
+                            except Exception:
+                                pass
+
+                if preset_items:
+                    token = store_inline_preset(user_id, preset_items, ttl_seconds=180)
+                    keyboard = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⏳", callback_data="processing")]])
+                    for idx, it in enumerate(preset_items[:3]):
+                        results.append(
+                            InlineQueryResultCachedAudio(
+                                id=f"preset:{token}:{idx}",
+                                audio_file_id=it["file_id"],
+                                caption="⏳",
+                                reply_markup=keyboard,
+                            )
+                        )
+
+                    try:
+                        await query.answer(results, cache_time=1, is_personal=True)
+                    except Exception:
+                        pass
+                    return
         
         # Если пусто — пробуем взять из Last.fm
         if not search_query:

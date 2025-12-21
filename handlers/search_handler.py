@@ -657,6 +657,14 @@ async def message_handler(message: types.Message, user_lang: str = "en"):
         except Exception:
             cached = None
 
+        # TikTok short links may not contain /photo/, but we can still cache them as slides.
+        if not cached and is_tiktok and cache_type != "tiktok_slides":
+            try:
+                cached = await get_cached_media(message.from_user.id, display_url, "tiktok_slides")
+                cache_type = "tiktok_slides" if cached else cache_type
+            except Exception:
+                pass
+
         if cached:
             try:
                 caption = make_caption({"title": cached.title or "Media"}, display_url, links_page=None)
@@ -781,9 +789,12 @@ async def message_handler(message: types.Message, user_lang: str = "en"):
             image_exts = ('.jpg', '.jpeg', '.png', '.webp')
 
             # TikTok Photos: send carousel as albums (10 per group) + attached audio
-            if is_tiktok_photo:
-                images = [f for f in files if f.lower().endswith(image_exts)]
-                audio_file = next((f for f in files if f.lower().endswith(audio_exts)), None)
+            images = [f for f in (files or []) if isinstance(f, str) and f.lower().endswith(image_exts)]
+            audio_file = next((f for f in (files or []) if isinstance(f, str) and f.lower().endswith(audio_exts)), None)
+            has_video = any(isinstance(f, str) and f.lower().endswith(video_exts) for f in (files or []))
+
+            # TikTok Photos: API may return only images (no mp4) even for vm.tiktok.com shortlinks.
+            if (is_tiktok_photo or (is_tiktok and images and not has_video)):
                 if not images:
                     raise Exception("No images found")
 

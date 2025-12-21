@@ -124,7 +124,7 @@ class Settings:
         public_base_url = os.getenv("TEST_PUBLIC_BASE_URL" if self.IS_TEST else "PUBLIC_BASE_URL", "").strip()
         self.PUBLIC_BASE_URL = public_base_url.rstrip("/")
 
-        self.OAUTH_HTTP_HOST = os.getenv("OAUTH_HTTP_HOST", "127.0.0.1").strip() or "127.0.0.1"
+        self.OAUTH_HTTP_HOST = os.getenv("OAUTH_HTTP_HOST", "127.0.0.1").strip() or "0.0.0.0"
         port_var = "TEST_OAUTH_HTTP_PORT" if self.IS_TEST else "OAUTH_HTTP_PORT"
         try:
             self.OAUTH_HTTP_PORT = int(os.getenv(port_var, "8089" if self.IS_TEST else "8088"))

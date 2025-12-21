@@ -3,7 +3,7 @@ from sqlalchemy import delete
 from sqlalchemy.dialects.sqlite import insert
 from datetime import datetime, timedelta
 from services.database.core import session_maker 
-from services.database.models import User, SystemSettings, GlobalCookies, MediaCache, UserRequest, UserOAuthToken, OAuthState, UserPreference
+from services.database.models import User, SystemSettings, GlobalCookies, MediaCache, MediaCacheBypass, UserRequest, UserOAuthToken, OAuthState, UserPreference
 
 # === РАБОТА С ПОЛЬЗОВАТЕЛЯМИ ===
 
@@ -157,8 +157,27 @@ async def delete_user(user_id: int) -> bool:
 async def get_all_users():
     """Получает всех пользователей."""
     async with session_maker() as session:
-        result = await session.execute(select(User))
+        result = await session.execute(select(User).order_by(User.first_seen.desc()))
         return result.scalars().all()
+
+
+async def get_basic_user_stats() -> dict:
+    """Return basic aggregated user stats.
+
+    Keys: total, active, banned, request_count
+    """
+    async with session_maker() as session:
+        total = await session.scalar(select(func.count()).select_from(User).where(User.id != 777000))
+        active = await session.scalar(select(func.count()).select_from(User).where(User.id != 777000, User.is_active == True))
+        banned = await session.scalar(select(func.count()).select_from(User).where(User.id != 777000, User.is_banned == True))
+        req_sum = await session.scalar(select(func.sum(User.request_count)).where(User.id != 777000))
+
+    return {
+        "total": int(total or 0),
+        "active": int(active or 0),
+        "banned": int(banned or 0),
+        "request_count": int(req_sum or 0),
+    }
 
 
 # === USER PREFERENCES (per-user key/value) ===
@@ -337,7 +356,107 @@ async def get_cached_media(user_id: int, url: str, media_type: str) -> MediaCach
                 MediaCache.media_type == media_type,
             )
         )
-        return res.scalar_one_or_none()
+        row = res.scalar_one_or_none()
+        if not row:
+            return None
+
+        # If there's a bypass marker newer than this cache row, ignore it.
+        try:
+            b = await session.execute(
+                select(MediaCacheBypass).where(
+                    MediaCacheBypass.user_id == user_id,
+                    MediaCacheBypass.url == url,
+                    MediaCacheBypass.media_type == media_type,
+                )
+            )
+            bypass = b.scalar_one_or_none()
+            if bypass and getattr(bypass, "created_at", None) and getattr(row, "last_used_at", None):
+                if bypass.created_at >= row.last_used_at:
+                    return None
+        except Exception:
+            # If bypass lookup fails, don't break normal cache behavior.
+            pass
+
+        return row
+
+
+async def bypass_cached_media(user_id: int, url: str, media_type: str) -> None:
+    """Mark one cache binding as bypassed (keeps MediaCache row intact)."""
+    if not url:
+        return
+    async with session_maker() as session:
+        async with session.begin():
+            now = datetime.now()
+            stmt = insert(MediaCacheBypass).values(
+                user_id=user_id,
+                url=url,
+                media_type=media_type,
+                created_at=now,
+            )
+            stmt = stmt.on_conflict_do_update(
+                index_elements=[MediaCacheBypass.user_id, MediaCacheBypass.url, MediaCacheBypass.media_type],
+                set_={"created_at": now},
+            )
+            await session.execute(stmt)
+
+
+async def bypass_media_cache_recent(seconds: int | None = None) -> int:
+    """Bypass cache bindings for rows used within the last `seconds`.
+
+    Returns number of MediaCache rows targeted (best-effort count).
+    """
+    if not seconds or seconds <= 0:
+        return 0
+    now = datetime.now()
+    cutoff = now - timedelta(seconds=int(seconds))
+
+    async with session_maker() as session:
+        async with session.begin():
+            rows = await session.execute(
+                select(MediaCache.user_id, MediaCache.url, MediaCache.media_type)
+                .where(MediaCache.last_used_at >= cutoff)
+            )
+            items = list(rows.all())
+            if not items:
+                return 0
+
+            # Upsert bypass markers (SQLite-friendly per-row upsert)
+            for uid, url, mt in items:
+                try:
+                    stmt = insert(MediaCacheBypass).values(user_id=uid, url=url, media_type=mt, created_at=now)
+                    stmt = stmt.on_conflict_do_update(
+                        index_elements=[MediaCacheBypass.user_id, MediaCacheBypass.url, MediaCacheBypass.media_type],
+                        set_={"created_at": now},
+                    )
+                    await session.execute(stmt)
+                except Exception:
+                    continue
+            return len(items)
+
+
+async def bypass_media_cache_all() -> int:
+    """Bypass all cache bindings currently present in media_cache.
+
+    Returns number of MediaCache rows targeted (best-effort count).
+    """
+    now = datetime.now()
+    async with session_maker() as session:
+        async with session.begin():
+            rows = await session.execute(select(MediaCache.user_id, MediaCache.url, MediaCache.media_type))
+            items = list(rows.all())
+            if not items:
+                return 0
+            for uid, url, mt in items:
+                try:
+                    stmt = insert(MediaCacheBypass).values(user_id=uid, url=url, media_type=mt, created_at=now)
+                    stmt = stmt.on_conflict_do_update(
+                        index_elements=[MediaCacheBypass.user_id, MediaCacheBypass.url, MediaCacheBypass.media_type],
+                        set_={"created_at": now},
+                    )
+                    await session.execute(stmt)
+                except Exception:
+                    continue
+            return len(items)
 
 
 async def upsert_cached_media(

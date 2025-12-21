@@ -26,6 +26,26 @@ def _clean_error_message(error_text: str) -> str:
     if "ERROR:" in text: 
         parts = text.split("ERROR:", 1)
         if len(parts) > 1: text = parts[1].strip()
+
+    lower = text.lower()
+    # TikTok: private/blocked/deleted often manifests as opaque extractor errors.
+    if "tiktok" in lower and any(
+        s in lower
+        for s in (
+            "private",
+            "unavailable",
+            "not available",
+            "not found",
+            "removed",
+            "deleted",
+            "this video is unavailable",
+            "login required",
+            "forbidden",
+            "403",
+        )
+    ):
+        return "Video unavailable"
+
     return text.split('\n')[0]
 
 class CommonDownloader(ABC):

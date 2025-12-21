@@ -23,6 +23,7 @@ import settings
 from core.queue_manager import queue_manager
 from uuid import uuid4
 import math
+from core.tg_safe import safe_reply, safe_reply_html
 
 PLAYLIST_CACHE = {}
 LAST_STATUS_TIME = {} 
@@ -120,7 +121,7 @@ async def handle_playlist_download(callback: types.CallbackQuery):
     from copy import copy
     results = await search_youtube(f"{track_name} audio", limit=1)
     if not results:
-        await callback.message.answer("❌ Track not found.")
+        await safe_reply(callback.message, "❌ Track not found.")
         return
     new_callback = copy(callback)
     new_callback.data = f"music:YT:{results[0]['id']}"
@@ -172,16 +173,16 @@ async def handle_link(message: types.Message):
         else:
             if caption_base: final_kwargs['caption'] = caption_base
 
-        async def try_send(reply_to_id, k):
-            return await safe_api_call(send_method, chat_id=message.chat.id, reply_to_message_id=reply_to_id, **k)
-
         try:
-            msg = await try_send(message.message_id, final_kwargs)
+            msg = await safe_api_call(send_method, chat_id=message.chat.id, reply_to_message_id=message.message_id, **final_kwargs)
             await logger(user, "MSG_SENT", text if text else "File Sent", msg)
             return msg
-        except Exception as e:
-            msg = await safe_api_call(send_method, chat_id=message.chat.id, **final_kwargs)
-            return msg
+        except Exception:
+            # If original message was deleted, reply_to will fail; fallback to a normal send.
+            try:
+                return await safe_api_call(send_method, chat_id=message.chat.id, **final_kwargs)
+            except Exception:
+                return None
 
     if not is_valid_url(url):
         if message.chat.type != "private": return
@@ -279,11 +280,19 @@ async def handle_link(message: types.Message):
     try:
         files, folder_path, error, meta = await queue_manager.process_task(user.id, download_task)
     except Exception as e:
-        if status_msg: await safe_api_call(status_msg.delete)
+        if status_msg:
+            try:
+                await safe_api_call(status_msg.delete)
+            except Exception:
+                pass
         return
 
     if error and "IS_SPOTIFY_PLAYLIST" in str(error):
-        if status_msg: await safe_api_call(status_msg.delete)
+        if status_msg:
+            try:
+                await safe_api_call(status_msg.delete)
+            except Exception:
+                pass
         if folder_path: shutil.rmtree(folder_path, ignore_errors=True)
         await show_spotify_playlist_ui(message, url, smart_send, user.id)
         return
@@ -297,7 +306,11 @@ async def handle_link(message: types.Message):
                 files, folder_path, error, meta = await download_content(url, {'user_cookie_content': user_cookies})
              else:
                 txt = await t(user.id, 'auth_required')
-                if status_msg: await safe_api_call(status_msg.delete)
+                if status_msg:
+                    try:
+                        await safe_api_call(status_msg.delete)
+                    except Exception:
+                        pass
                 await smart_send(message.bot.send_message, text=txt, parse_mode="HTML")
                 return
 
@@ -349,13 +362,16 @@ async def handle_link(message: types.Message):
         if target_file: media_type = 'audio'
         
     if not target_file:
-        target_file = next((f for f in files if f.endswith(tuple(image_exts))), None)
-        if target_file: 
-              is_tiktok_photo = ("tiktok" in url) and ("/photo/" in url) and len([f for f in files if f.endswith(tuple(image_exts))]) > 1
-            if is_tiktok_photo:
-                 media_type = 'tiktok_slides'
-            elif not is_music_url and "youtube" not in url: 
-                 media_type = 'photo'
+        images = [f for f in (files or []) if f.endswith(tuple(image_exts))]
+        is_tiktok_photo = ("tiktok" in (url or "")) and ("/photo/" in (url or "")) and len(images) > 1
+
+        if is_tiktok_photo:
+            media_type = 'tiktok_slides'
+            target_file = images[0] if images else None
+        else:
+            target_file = images[0] if images else None
+            if target_file and (not is_music_url) and ("youtube" not in (url or "")):
+                media_type = 'photo'
 
     if not target_file and media_type != 'tiktok_slides':
         if status_msg: await safe_api_call(status_msg.edit_text, "❌ No supported media found.")
@@ -385,7 +401,7 @@ async def handle_link(message: types.Message):
     
     try:
         if media_type == 'tiktok_slides':
-             if not await get_module_status("TikTokPhotos"):
+             if not await get_module_status("TikTokPhoto"):
                  await smart_send(message.bot.send_message, text=await t(user.id, 'module_disabled'))
                  return
              images = [f for f in files if f.endswith(tuple(image_exts))]
@@ -437,7 +453,10 @@ async def handle_link(message: types.Message):
                  pass
 
              if status_msg:
-                 await safe_api_call(status_msg.delete)
+                 try:
+                     await safe_api_call(status_msg.delete)
+                 except Exception:
+                     pass
              return
 
         elif media_type == 'audio':
@@ -491,7 +510,11 @@ async def handle_link(message: types.Message):
              except Exception:
                  pass
              
-        if status_msg: await safe_api_call(status_msg.delete)
+        if status_msg:
+            try:
+                await safe_api_call(status_msg.delete)
+            except Exception:
+                pass
 
     except Exception as e:
         await logger(user, "MSG_FAIL", str(e))
@@ -507,10 +530,10 @@ async def handle_plain_text(message: types.Message):
     await safe_api_call(message.bot.send_chat_action, chat_id=message.chat.id, action=ChatAction.TYPING)
     results = await search_youtube(message.text.strip(), limit=5)
     if not results:
-        await safe_api_call(message.answer, await t(user.id, 'nothing_found'))
+        await safe_reply(message, await t(user.id, 'nothing_found'))
         return
     buttons = []
     for res in results:
         title = res.get('title', 'Track')
         buttons.append([InlineKeyboardButton(text=f"{title} ({res['duration']})", callback_data=f"music:YT:{res['id']}")])
-    await safe_api_call(message.answer, f"🔍 Results for: {message.text}", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
+    await safe_reply(message, f"🔍 Results for: {message.text}", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
