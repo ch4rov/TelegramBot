@@ -30,11 +30,12 @@ router.message.filter(AdminFilter())
 _UPDATE_PENDING: dict[int, dict] = {}
 
 
-async def _download_telegram_file_bytes(bot, file_path: str) -> bytes:
-    """Download a Telegram file by file_path.
+async def _download_telegram_file_bytes(bot, file_path: str, file_id: str | None = None) -> bytes:
+    """Download a Telegram file.
 
-    Primary: bot.download_file() (uses configured API server, e.g. local bot-api).
-    Fallback: official Telegram file CDN when local bot-api returns 404.
+    Primary: bot.download_file(file_path) (uses configured API server, e.g. local bot-api).
+    Fallback: if local bot-api returns 404, fetch real file_path via official getFile(file_id)
+    and then download from api.telegram.org/file.
     """
     try:
         file_content = await bot.download_file(file_path)
@@ -44,7 +45,7 @@ async def _download_telegram_file_bytes(bot, file_path: str) -> bytes:
         if "404" not in msg and "Not Found" not in msg:
             raise
 
-    # Fallback to api.telegram.org/file
+    # Fallback to api.telegram.org/file (needs real file_path from official getFile)
     try:
         from core.config import config
         token = (getattr(config, "BOT_TOKEN", "") or "").strip()
@@ -53,13 +54,35 @@ async def _download_telegram_file_bytes(bot, file_path: str) -> bytes:
     if not token:
         raise RuntimeError("BOT_TOKEN is missing; cannot download from api.telegram.org/file")
 
-    safe_path = quote(file_path.lstrip("/"), safe="/")
-    url = f"https://api.telegram.org/file/bot{token}/{safe_path}"
+    if not file_id:
+        raise RuntimeError("file_id is missing; cannot resolve file_path via getFile")
 
     import aiohttp
 
     timeout = aiohttp.ClientTimeout(total=120)
+
+    # 1) Resolve real file_path via official API
+    get_file_url = f"https://api.telegram.org/bot{token}/getFile?file_id={quote(str(file_id))}"
     async with aiohttp.ClientSession(timeout=timeout) as session:
+        async with session.get(get_file_url) as resp:
+            body_text = await resp.text()
+            if resp.status != 200:
+                raise RuntimeError(f"Telegram getFile failed: HTTP {resp.status}: {body_text[:200]}")
+            try:
+                payload = await resp.json(content_type=None)
+            except Exception:
+                raise RuntimeError(f"Telegram getFile returned non-JSON: {body_text[:200]}")
+
+            if not isinstance(payload, dict) or not payload.get("ok"):
+                raise RuntimeError(f"Telegram getFile failed: {str(payload)[:200]}")
+
+            real_path = (((payload.get("result") or {}) if isinstance(payload.get("result"), dict) else {}) .get("file_path") or "").strip()
+            if not real_path:
+                raise RuntimeError(f"Telegram getFile returned empty file_path: {str(payload)[:200]}")
+
+        # 2) Download from official file CDN
+        safe_path = quote(real_path.lstrip("/"), safe="/")
+        url = f"https://api.telegram.org/file/bot{token}/{safe_path}"
         async with session.get(url) as resp:
             if resp.status != 200:
                 body = await resp.text()
@@ -362,7 +385,7 @@ async def cmd_importdb(message: types.Message, command: CommandObject):
         tmp_path = os.path.join("tempfiles", "import_db", f"{uuid.uuid4().hex}.db")
 
         file_obj = await message.bot.get_file(doc.file_id)
-        data = await _download_telegram_file_bytes(message.bot, file_obj.file_path)
+        data = await _download_telegram_file_bytes(message.bot, file_obj.file_path, file_id=doc.file_id)
         if not _is_sqlite_file_header(data):
             await message.reply("This file is not a valid SQLite database.", disable_notification=True)
             return
