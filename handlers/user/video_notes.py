@@ -404,6 +404,27 @@ async def process_video(message: types.Message, user_lang: str = "en"):
             except Exception:
                 pass
 
+    except Exception as e:
+        logger.exception("Error processing video")
+        if isinstance(e, TelegramBadRequest) and "file is too big" in str(e).lower():
+            await safe_reply(message, _t(user_lang, "too_big"), disable_notification=True, parse_mode=None)
+        else:
+            # Avoid HTML parsing errors from angle brackets in exception texts (bot default parse_mode is HTML).
+            await safe_reply(message, _t(user_lang, "generic_error"), disable_notification=True, parse_mode=None)
+        try:
+            if status:
+                await status.delete()
+        except Exception:
+            pass
+
+        stop.set()
+        if pulse_task:
+            try:
+                await pulse_task
+            except Exception:
+                pass
+
+# --- Helpers: ffmpeg/ffprobe discovery ---
 def _find_ffmpeg() -> str:
     # Prefer bundled Windows binary if present
     try:
@@ -434,23 +455,3 @@ def _find_ffprobe() -> str:
         return "/usr/bin/ffprobe"
     found = shutil.which("ffprobe")
     return found or "ffprobe"
-            
-    except Exception as e:
-        logger.exception("Error processing video")
-        if isinstance(e, TelegramBadRequest) and "file is too big" in str(e).lower():
-            await safe_reply(message, _t(user_lang, "too_big"), disable_notification=True, parse_mode=None)
-        else:
-            # Avoid HTML parsing errors from angle brackets in exception texts (bot default parse_mode is HTML).
-            await safe_reply(message, _t(user_lang, "generic_error"), disable_notification=True, parse_mode=None)
-        try:
-            if status:
-                await status.delete()
-        except Exception:
-            pass
-
-        stop.set()
-        if pulse_task:
-            try:
-                await pulse_task
-            except Exception:
-                pass
