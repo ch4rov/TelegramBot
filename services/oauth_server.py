@@ -47,6 +47,7 @@ class OAuthServer:
 
         app = web.Application()
         app.router.add_get("/", self._index)
+        app.router.add_get("/robots.txt", self._robots)
         app.router.add_get("/health", self._health)
         app.router.add_get("/status", self._status)
         app.router.add_get("/oauth/spotify/callback", self._spotify_callback)
@@ -74,6 +75,19 @@ class OAuthServer:
 
     async def _health(self, request: web.Request) -> web.Response:
         return web.Response(text="OK")
+
+    async def _robots(self, request: web.Request) -> web.Response:
+        try:
+            import os
+
+            base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+            robots_path = os.path.join(base_dir, "robots.txt")
+            if os.path.exists(robots_path):
+                with open(robots_path, "r", encoding="utf-8") as f:
+                    return web.Response(text=f.read(), status=200, content_type="text/plain")
+        except Exception:
+            pass
+        return web.Response(text="User-agent: *\nDisallow: /\n", status=200, content_type="text/plain")
 
     async def _index(self, request: web.Request) -> web.Response:
         html = """<!doctype html>

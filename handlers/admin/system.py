@@ -7,6 +7,7 @@ import re
 import datetime
 import asyncio
 import subprocess
+import shutil
 import settings
 from aiogram import Router, types, F
 from aiogram.filters import Command, CommandObject
@@ -20,6 +21,39 @@ router = Router()
 router.message.filter(AdminFilter())
 
 _UPDATE_PENDING: dict[int, dict] = {}
+
+
+def _is_running_in_docker() -> bool:
+    # Common, cheap checks
+    try:
+        if os.path.exists("/.dockerenv"):
+            return True
+    except Exception:
+        pass
+    try:
+        cgroup = "/proc/1/cgroup"
+        if os.path.exists(cgroup):
+            with open(cgroup, "r", encoding="utf-8", errors="ignore") as f:
+                txt = f.read().lower()
+            if "docker" in txt or "containerd" in txt or "kubepods" in txt:
+                return True
+    except Exception:
+        pass
+    return False
+
+
+def _docker_update_instructions(repo_hint: str | None = None) -> str:
+    repo_hint = repo_hint or "<path-to-TelegramBot>"
+    # Keep it short and copy-pastable for admins.
+    return (
+        "⚠️ /update inside Docker cannot pull from git (usually .git is not in the image).\n\n"
+        "Update on the host where the repo and docker-compose.yml live:\n"
+        f"<code>cd {repo_hint}</code>\n"
+        "<code>git pull</code>\n"
+        "<code>docker compose up -d --build --force-recreate</code>\n"
+        "\nThen check logs:\n"
+        "<code>docker compose logs -f --tail=200 telegrambot</code>"
+    )
 
 
 async def _run_git(args: list[str], cwd: str) -> tuple[int, str, str]:
@@ -338,6 +372,10 @@ async def cmd_update(message: types.Message):
     # Basic git availability/worktree checks
     rc, out, err = await _run_git(["rev-parse", "--is-inside-work-tree"], cwd=repo)
     if rc != 0 or "true" not in (out or "").lower():
+        # In Docker builds we often exclude .git; provide the correct update flow.
+        if _is_running_in_docker() or os.path.exists(os.path.join(repo, "docker-compose.yml")):
+            await message.answer(_docker_update_instructions(repo_hint="/path/to/TelegramBot"), parse_mode="HTML")
+            return
         await message.answer("❌ Not a git repository (cannot update).")
         return
 

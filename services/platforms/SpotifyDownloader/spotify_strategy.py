@@ -141,9 +141,7 @@ class SpotifyStrategy(CommonDownloader):
         
         artist, track = meta.get('artist'), meta.get('track')
         
-        # --- ГЛАВНАЯ ЧИСТКА ---
         artist = self._clean_artist_name(artist)
-        # ----------------------
         
         search_query = f"{artist} - {track} audio" if artist else f"{track} audio"
         
