@@ -374,7 +374,8 @@ async def cmd_update(message: types.Message):
     if rc != 0 or "true" not in (out or "").lower():
         # In Docker builds we often exclude .git; provide the correct update flow.
         if _is_running_in_docker() or os.path.exists(os.path.join(repo, "docker-compose.yml")):
-            await message.answer(_docker_update_instructions(repo_hint="/path/to/TelegramBot"), parse_mode="HTML")
+            repo_hint = os.getenv("UPDATE_REPO_HINT", "/path/to/TelegramBot").strip() or "/path/to/TelegramBot"
+            await message.answer(_docker_update_instructions(repo_hint=repo_hint), parse_mode="HTML")
             return
         await message.answer("❌ Not a git repository (cannot update).")
         return
