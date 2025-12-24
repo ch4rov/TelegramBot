@@ -143,6 +143,9 @@ async def cmd_cmd(message: types.Message):
         # Show only commands that work without required arguments.
         # (Commands like /ban require an argument, so they are excluded to stay "click-to-send" friendly.)
         skip_requires_args = {"ban", "unban", "answer", "edituser"}
+        # In Docker, /update cannot work inside the container; hide it from the tappable list.
+        if _is_running_in_docker():
+            skip_requires_args.add("update")
         items = [x for x in items if x and str(x[0]) not in skip_requires_args]
 
         user_cmds = [x for x in items if len(x) >= 5 and x[3] == "user"]
@@ -368,6 +371,12 @@ async def cmd_savedb(message: types.Message):
 async def cmd_update(message: types.Message):
     """Pull latest code from GitHub and restart (admin only)."""
     repo = _repo_root()
+
+    # If running inside Docker, disable /update (cannot pull inside image without .git and docker engine access).
+    if _is_running_in_docker():
+        repo_hint = os.getenv("UPDATE_REPO_HINT", "/path/to/TelegramBot").strip() or "/path/to/TelegramBot"
+        await message.answer(_docker_update_instructions(repo_hint=repo_hint), parse_mode="HTML")
+        return
 
     # Basic git availability/worktree checks
     rc, out, err = await _run_git(["rev-parse", "--is-inside-work-tree"], cwd=repo)

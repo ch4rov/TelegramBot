@@ -3,6 +3,7 @@ import os
 import asyncio
 import logging
 import uuid
+import shutil
 from core.tg_safe import safe_reply
 import subprocess
 from aiogram import Router, types, F, Bot
@@ -117,6 +118,8 @@ async def _optimize_video_size(
         "-crf", "26",
         "-c:a", "aac",
         "-b:a", "64k",
+        "-pix_fmt", "yuv420p",
+        "-movflags", "+faststart",
         "-f", "mp4",
         output_path,
     ]
@@ -148,11 +151,7 @@ async def _optimize_video_size(
     logger.info(f"Video size {file_size / 1024 / 1024:.1f} MB exceeds limit; re-encoding with lower bitrate...")
     
     # Get video duration to calculate target bitrate
-    base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-    installs_dir = os.path.join(base_dir, "core", "installs")
-    ffprobe_path = os.path.join(installs_dir, "ffprobe.exe")
-    if not os.path.exists(ffprobe_path):
-        ffprobe_path = "ffprobe"
+    ffprobe_path = _find_ffprobe()
     
     duration = await _get_video_duration(ffprobe_path, input_path)
     if not duration or duration <= 0:
@@ -183,6 +182,8 @@ async def _optimize_video_size(
             "-bufsize", f"{available_bitrate * 2:.0f}k",
             "-c:a", "aac",
             "-b:a", "64k",
+            "-pix_fmt", "yuv420p",
+            "-movflags", "+faststart",
             "-f", "mp4",
             output_path,
         ]
@@ -331,11 +332,14 @@ async def process_video(message: types.Message, user_lang: str = "en"):
         current_action = ChatAction.RECORD_VIDEO_NOTE
         
         # FFmpeg: Crop to square (min side), scale 640x640, format mp4
-        base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-        installs_dir = os.path.join(base_dir, "core", "installs")
-        ffmpeg_path = os.path.join(installs_dir, "ffmpeg.exe")
-        if not os.path.exists(ffmpeg_path):
-            ffmpeg_path = "ffmpeg"
+        ffmpeg_path = _find_ffmpeg()
+        # Ensure directory of ffmpeg is in PATH (avoids WSL shims on Windows)
+        try:
+            if ffmpeg_path and os.path.isfile(ffmpeg_path):
+                ffdir = os.path.dirname(ffmpeg_path)
+                os.environ["PATH"] = ffdir + os.pathsep + os.environ.get("PATH", "")
+        except Exception:
+            pass
 
         vf = "crop=min(iw\\,ih):min(iw\\,ih),scale=640:640"
         
@@ -399,6 +403,37 @@ async def process_video(message: types.Message, user_lang: str = "en"):
                 await pulse_task
             except Exception:
                 pass
+
+def _find_ffmpeg() -> str:
+    # Prefer bundled Windows binary if present
+    try:
+        base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+        installs_dir = os.path.join(base_dir, "core", "installs")
+        win_ffmpeg = os.path.join(installs_dir, "ffmpeg.exe")
+        if os.path.exists(win_ffmpeg):
+            return win_ffmpeg
+    except Exception:
+        pass
+    # Linux default path inside Docker
+    if os.path.exists("/usr/bin/ffmpeg"):
+        return "/usr/bin/ffmpeg"
+    # System PATH
+    found = shutil.which("ffmpeg")
+    return found or "ffmpeg"
+
+def _find_ffprobe() -> str:
+    try:
+        base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+        installs_dir = os.path.join(base_dir, "core", "installs")
+        win_ffprobe = os.path.join(installs_dir, "ffprobe.exe")
+        if os.path.exists(win_ffprobe):
+            return win_ffprobe
+    except Exception:
+        pass
+    if os.path.exists("/usr/bin/ffprobe"):
+        return "/usr/bin/ffprobe"
+    found = shutil.which("ffprobe")
+    return found or "ffprobe"
             
     except Exception as e:
         logger.exception("Error processing video")
