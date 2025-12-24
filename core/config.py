@@ -12,7 +12,14 @@ DEFAULT_PROD_BOT_USERNAME = "ch4rov_bot"
 BASE_DIR = Path(__file__).resolve().parent.parent
 ENV_PATH = BASE_DIR / ".env"
 
-if not ENV_PATH.exists():
+# Only load .env if it exists (Docker sets vars via environment section instead)
+# If running locally without Docker, create .env template if missing
+running_in_docker = os.path.exists("/.dockerenv") or os.getenv("USE_LOCAL_SERVER") is not None
+
+if ENV_PATH.exists():
+    load_dotenv(dotenv_path=ENV_PATH)
+elif not running_in_docker:
+    # Only create .env template if we're NOT in Docker
     template = """# TelegramBot environment
 # Fill in at least one token (TEST_BOT_TOKEN or BOT_TOKEN) before запуск.
 
@@ -74,8 +81,6 @@ SPOTIFY_SCOPES=user-read-currently-playing user-read-recently-played
         print("[ERROR] .env file not found and could not be created: " + str(ENV_PATH))
         print("[ERROR] " + str(e))
     sys.exit(1)
-
-load_dotenv(dotenv_path=ENV_PATH)
 
 class Settings:
     def __init__(self):
