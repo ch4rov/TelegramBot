@@ -22,7 +22,15 @@ services:
     restart: unless-stopped
     env_file:
       - ./.env
-    command: tunnel --no-autoupdate run --token ${CLOUDFLARED_TUNNEL_TOKEN}
+    volumes:
+      - "${DATA_DIR:-telegrambot-data}:/data"
+    command: >
+      /bin/sh -c
+      'if [ "${IS_TEST_ENV}" = "True" ] || [ "${IS_TEST_ENV}" = "true" ] || [ "${IS_TEST_ENV}" = "1" ]; then
+         cloudflared tunnel --no-autoupdate --url "${ORIGIN_URL:-http://telegrambot:8089}" --logfile /data/cloudflared.log --loglevel info;
+       else
+         cloudflared tunnel --no-autoupdate run --token "${CLOUDFLARED_TUNNEL_TOKEN}";
+       fi'
     networks:
       - ch4robo-network
     depends_on:

@@ -32,8 +32,11 @@
    - `ADMIN_IDS`
    - `TECH_CHAT_ID`
    - `TELEGRAM_API_ID` и `TELEGRAM_API_HASH` (для Local API)
-   - `CLOUDFLARED_TUNNEL_TOKEN` (для OAuth)
-   - `TEST_PUBLIC_BASE_URL` (URL туннеля из Cloudflare)
+   - `CLOUDFLARED_TUNNEL_TOKEN` (для PROD домена)
+   - `PUBLIC_BASE_URL` (например `https://botmenu.ch4rov.pl`)
+   - `MINIAPP_PUBLIC_URL` (например `https://botmenu.ch4rov.pl`)
+   - Для TEST можно оставить `TEST_PUBLIC_BASE_URL` пустым: в тесте cloudflared поднимет quick tunnel и бот попробует сам взять URL из `/data/cloudflared.log`
+   - `TEST_MINIAPP_PUBLIC_URL` (например `https://botmenutesting.ch4rov.pl`) если используешь тестовый поддомен
    - `TEST_SPOTIFY_CLIENT_ID` и `TEST_SPOTIFY_CLIENT_SECRET` (опционально для Spotify)
 
 3) Запусти все три контейнера:
@@ -90,7 +93,11 @@ A: Нет. `docker compose up -d` запускает все три сразу. �
 A: `docker compose logs telegram-bot-api` — там должна быть строка `Server started`. В боте выстави `USE_LOCAL_SERVER=True` в compose (уже выставлено).
 
 **Q: Cloudflare tunnel не подключается?**  
-A: Проверь `CLOUDFLARED_TUNNEL_TOKEN` в `.env` и убедись, что в Cloudflare Dashboard настроен Public Hostname → Service: `http://ch4robo-bot:8089` (или 8088).
+A: 
+- PROD: проверь `CLOUDFLARED_TUNNEL_TOKEN` в `.env` и в Cloudflare Dashboard настрой Public Hostname `botmenu.ch4rov.pl` → Service `http://telegrambot:8088`
+- TEST: при `IS_TEST_ENV=True` по умолчанию используется quick tunnel на `ORIGIN_URL` (по умолчанию `http://telegrambot:8089`). Если хочешь тестовый домен `botmenutesting.ch4rov.pl`, создай отдельный Tunnel в Cloudflare и выставь `TEST_PUBLIC_BASE_URL=https://botmenutesting.ch4rov.pl`
+
+Примечание: `telegrambot` — это имя сервиса в `docker-compose.yml` внутри сети Docker. `ch4robo-bot` — `container_name` (алиас), но в документации используем `telegrambot`.
 
 **Q: Где лежат данные?**  
 - База бота: `./data/bot.db` (на хосте)
@@ -113,3 +120,16 @@ docker compose up -d --build telegrambot
 # Удалить всё (включая volumes)
 docker compose down -v
 ```
+
+## Тест без Docker (локально)
+Если на тестовой машине нет Docker, quick tunnel контейнером не поднимется. Тогда:
+
+```powershell
+# 1) Запусти бота локально (как обычно)
+python run.py
+
+# 2) В отдельном окне запусти cloudflared (предварительно скачай cloudflared.exe)
+cloudflared tunnel --url http://127.0.0.1:8089
+```
+
+Cloudflared напечатает временный URL вида `https://xxxxx.trycloudflare.com` — вставь его в `.env` как `TEST_PUBLIC_BASE_URL`.

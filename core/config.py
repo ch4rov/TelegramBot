@@ -2,6 +2,7 @@
 import os
 import sys
 import logging
+import re
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -127,7 +128,12 @@ class Settings:
         # === OAuth callback server & provider apps ===
         # Public base URL (tunnel). Used for redirect_uri.
         public_base_url = os.getenv("TEST_PUBLIC_BASE_URL" if self.IS_TEST else "PUBLIC_BASE_URL", "").strip()
-        self.PUBLIC_BASE_URL = public_base_url.rstrip("/")
+        public_base_url = public_base_url.rstrip("/")
+
+        if self.IS_TEST and not public_base_url:
+            public_base_url = self._try_read_quick_tunnel_url().rstrip("/")
+
+        self.PUBLIC_BASE_URL = public_base_url
 
         default_oauth_host = "0.0.0.0" if running_in_docker else "127.0.0.1"
         self.OAUTH_HTTP_HOST = (os.getenv("OAUTH_HTTP_HOST") or default_oauth_host).strip() or default_oauth_host
@@ -142,7 +148,6 @@ class Settings:
         self.SPOTIFY_CLIENT_SECRET = (os.getenv("TEST_SPOTIFY_CLIENT_SECRET" if self.IS_TEST else "SPOTIFY_CLIENT_SECRET", "") or "").strip()
         self.SPOTIFY_SCOPES = (os.getenv("SPOTIFY_SCOPES", "user-read-currently-playing user-read-recently-played") or "").strip()
 
-        
         # 6. Database
         db_type = os.getenv("DB_TYPE", "sqlite").lower()
         if db_type == "postgres":
@@ -153,8 +158,23 @@ class Settings:
             db_name = os.getenv("DB_NAME", "telegram_bot")
             self.DB_URL = f"postgresql+asyncpg://{db_user}:{db_pass}@{db_host}:{db_port}/{db_name}"
         else:
-            # SQLite (default)
             db_path = os.getenv("DB_PATH", str(BASE_DIR / "bot.db"))
             self.DB_URL = f"sqlite+aiosqlite:///{db_path}"
+
+    def _try_read_quick_tunnel_url(self) -> str:
+        candidates = ["/data/cloudflared_url.txt", "/data/cloudflared.log"]
+        pattern = re.compile(r"https://[a-z0-9-]+\.trycloudflare\.com", re.IGNORECASE)
+        for path in candidates:
+            try:
+                if not os.path.exists(path):
+                    continue
+                with open(path, "r", encoding="utf-8", errors="ignore") as f:
+                    text = f.read()
+                m = pattern.search(text)
+                if m:
+                    return m.group(0)
+            except Exception:
+                continue
+        return ""
 
 config = Settings()

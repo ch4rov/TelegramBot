@@ -135,12 +135,12 @@ async def cb_users_page(call: types.CallbackQuery):
 
     users = await get_all_users()
     text, kb = _render_users_page(users, page=page, page_size=20)
-    await call.answer("OK")
     try:
+        await call.answer()
         await call.message.edit_text(text, reply_markup=kb, disable_web_page_preview=True, parse_mode="HTML")
     except Exception:
         try:
-            await call.message.reply(text, reply_markup=kb, disable_web_page_preview=True, parse_mode="HTML")
+            await call.answer("Can't edit this message. Send /users again.", show_alert=True)
         except Exception:
             pass
 
