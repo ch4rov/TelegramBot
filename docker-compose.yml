@@ -1,16 +1,57 @@
 services:
+  # Telegram Bot API (Local Server для файлов >50MB)
+  telegram-bot-api:
+    image: aiogram/telegram-bot-api:latest
+    container_name: ch4robo-api
+    restart: unless-stopped
+    environment:
+      TELEGRAM_API_ID: "${TELEGRAM_API_ID}"
+      TELEGRAM_API_HASH: "${TELEGRAM_API_HASH}"
+    volumes:
+      - telegram-api-data:/var/lib/telegram-bot-api
+    ports:
+      - "8081:8081"
+    networks:
+      - ch4robo-network
+
+  # Cloudflared Tunnel (для OAuth callback через публичный URL)
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: ch4robo-auth
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run --token ${CLOUDFLARED_TUNNEL_TOKEN}
+    networks:
+      - ch4robo-network
+    depends_on:
+      - telegrambot
+
+  # Основной бот
   telegrambot:
     build:
       context: .
-    container_name: telegrambot
+    container_name: ch4robo-bot
     restart: unless-stopped
-    # core/config.py expects /app/.env; we mount host .env
     volumes:
       - ./.env:/app/.env:ro
       - ./data:/data
     environment:
       DB_TYPE: sqlite
       DB_PATH: /data/bot.db
+      USE_LOCAL_SERVER: "True"
+      LOCAL_SERVER_URL: "http://telegram-bot-api:8081"
     ports:
       - "8088:8088"
       - "8089:8089"
+    networks:
+      - ch4robo-network
+    depends_on:
+      - telegram-bot-api
+
+networks:
+  ch4robo-network:
+    name: ch4robo-network
+    driver: bridge
+
+volumes:
+  telegram-api-data:
+    name: ch4robo-api-data
