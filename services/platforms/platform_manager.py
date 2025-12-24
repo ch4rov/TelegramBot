@@ -175,7 +175,9 @@ async def download_content(url, custom_opts=None, user_id=None):
         base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
         installs_dir = os.path.join(base_dir, "core", "installs")
         local_ffmpeg = os.path.join(installs_dir, "ffmpeg.exe")
-        if os.path.exists(local_ffmpeg):
+        # Use .exe only on Windows; in Docker/Linux prefer system ffmpeg
+        import platform as _plat
+        if _plat.system().lower().startswith("win") and os.path.exists(local_ffmpeg):
             ydl_opts["ffmpeg_location"] = local_ffmpeg
         else:
             system_ffmpeg = shutil.which("ffmpeg")

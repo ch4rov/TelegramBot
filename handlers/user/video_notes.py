@@ -4,6 +4,7 @@ import asyncio
 import logging
 import uuid
 import shutil
+import platform
 from core.tg_safe import safe_reply
 import subprocess
 from aiogram import Router, types, F, Bot
@@ -426,13 +427,14 @@ async def process_video(message: types.Message, user_lang: str = "en"):
 
 # --- Helpers: ffmpeg/ffprobe discovery ---
 def _find_ffmpeg() -> str:
-    # Prefer bundled Windows binary if present
+    # Prefer bundled Windows binary only when running on Windows
     try:
-        base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-        installs_dir = os.path.join(base_dir, "core", "installs")
-        win_ffmpeg = os.path.join(installs_dir, "ffmpeg.exe")
-        if os.path.exists(win_ffmpeg):
-            return win_ffmpeg
+        if platform.system().lower().startswith("win"):
+            base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+            installs_dir = os.path.join(base_dir, "core", "installs")
+            win_ffmpeg = os.path.join(installs_dir, "ffmpeg.exe")
+            if os.path.exists(win_ffmpeg):
+                return win_ffmpeg
     except Exception:
         pass
     # Linux default path inside Docker
@@ -444,11 +446,12 @@ def _find_ffmpeg() -> str:
 
 def _find_ffprobe() -> str:
     try:
-        base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-        installs_dir = os.path.join(base_dir, "core", "installs")
-        win_ffprobe = os.path.join(installs_dir, "ffprobe.exe")
-        if os.path.exists(win_ffprobe):
-            return win_ffprobe
+        if platform.system().lower().startswith("win"):
+            base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+            installs_dir = os.path.join(base_dir, "core", "installs")
+            win_ffprobe = os.path.join(installs_dir, "ffprobe.exe")
+            if os.path.exists(win_ffprobe):
+                return win_ffprobe
     except Exception:
         pass
     if os.path.exists("/usr/bin/ffprobe"):
