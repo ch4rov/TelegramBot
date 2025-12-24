@@ -14,7 +14,7 @@ ENV_PATH = BASE_DIR / ".env"
 
 # Only load .env if it exists (Docker sets vars via environment section instead)
 # If running locally without Docker, create .env template if missing
-running_in_docker = os.path.exists("/.dockerenv") or os.getenv("USE_LOCAL_SERVER") is not None
+running_in_docker = os.path.exists("/.dockerenv")
 
 if ENV_PATH.exists():
     load_dotenv(dotenv_path=ENV_PATH)
@@ -129,7 +129,8 @@ class Settings:
         public_base_url = os.getenv("TEST_PUBLIC_BASE_URL" if self.IS_TEST else "PUBLIC_BASE_URL", "").strip()
         self.PUBLIC_BASE_URL = public_base_url.rstrip("/")
 
-        self.OAUTH_HTTP_HOST = os.getenv("OAUTH_HTTP_HOST", "127.0.0.1").strip() or "0.0.0.0"
+        default_oauth_host = "0.0.0.0" if running_in_docker else "127.0.0.1"
+        self.OAUTH_HTTP_HOST = (os.getenv("OAUTH_HTTP_HOST") or default_oauth_host).strip() or default_oauth_host
         port_var = "TEST_OAUTH_HTTP_PORT" if self.IS_TEST else "OAUTH_HTTP_PORT"
         try:
             self.OAUTH_HTTP_PORT = int(os.getenv(port_var, "8089" if self.IS_TEST else "8088"))
