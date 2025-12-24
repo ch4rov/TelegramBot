@@ -11,6 +11,7 @@ import shutil
 import sqlite3
 import uuid
 import settings
+from urllib.parse import quote
 from aiogram import Router, types, F
 from aiogram.filters import Command, CommandObject
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
@@ -27,6 +28,43 @@ router = Router()
 router.message.filter(AdminFilter())
 
 _UPDATE_PENDING: dict[int, dict] = {}
+
+
+async def _download_telegram_file_bytes(bot, file_path: str) -> bytes:
+    """Download a Telegram file by file_path.
+
+    Primary: bot.download_file() (uses configured API server, e.g. local bot-api).
+    Fallback: official Telegram file CDN when local bot-api returns 404.
+    """
+    try:
+        file_content = await bot.download_file(file_path)
+        return file_content.read()
+    except Exception as e:
+        msg = str(e)
+        if "404" not in msg and "Not Found" not in msg:
+            raise
+
+    # Fallback to api.telegram.org/file
+    try:
+        from core.config import config
+        token = (getattr(config, "BOT_TOKEN", "") or "").strip()
+    except Exception:
+        token = ""
+    if not token:
+        raise RuntimeError("BOT_TOKEN is missing; cannot download from api.telegram.org/file")
+
+    safe_path = quote(file_path.lstrip("/"), safe="/")
+    url = f"https://api.telegram.org/file/bot{token}/{safe_path}"
+
+    import aiohttp
+
+    timeout = aiohttp.ClientTimeout(total=120)
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        async with session.get(url) as resp:
+            if resp.status != 200:
+                body = await resp.text()
+                raise RuntimeError(f"Failed to download from Telegram CDN: HTTP {resp.status}: {body[:200]}")
+            return await resp.read()
 
 
 def _is_running_in_docker() -> bool:
@@ -324,8 +362,7 @@ async def cmd_importdb(message: types.Message, command: CommandObject):
         tmp_path = os.path.join("tempfiles", "import_db", f"{uuid.uuid4().hex}.db")
 
         file_obj = await message.bot.get_file(doc.file_id)
-        file_content = await message.bot.download_file(file_obj.file_path)
-        data = file_content.read()
+        data = await _download_telegram_file_bytes(message.bot, file_obj.file_path)
         if not _is_sqlite_file_header(data):
             await message.reply("This file is not a valid SQLite database.", disable_notification=True)
             return
