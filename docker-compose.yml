@@ -1,3 +1,5 @@
+name: ch4robo
+
 services:
   # Telegram Bot API (Local Server для файлов >50MB)
   telegram-bot-api:
@@ -33,7 +35,9 @@ services:
     container_name: ch4robo-bot
     restart: unless-stopped
     volumes:
-      - ./data:/data
+      # Default: named volume (portable, no dependency on host disk paths)
+      # Override: set DATA_DIR to an absolute path (e.g. B:/telegrambot/data) to use a bind mount
+      - "${DATA_DIR:-ch4robo-bot-data}:/data"
     env_file:
       - ./.env
     environment:
@@ -57,3 +61,5 @@ networks:
 volumes:
   telegram-api-data:
     name: ch4robo-api-data
+  telegrambot-data:
+    name: ch4robo-bot-data
