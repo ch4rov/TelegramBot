@@ -14,7 +14,9 @@ from aiogram.filters import Command, CommandObject
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from handlers.admin.filters import AdminFilter
 from services.database.repo import get_all_users
+from services.database.repo import ensure_user_exists, set_system_value
 from services.database.backup import send_db_backup
+from services.database.core import init_db
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -171,6 +173,47 @@ async def cmd_cmd(message: types.Message):
     except Exception as e:
         logger.error(f"Error in /cmd: {e}")
         await message.reply("Error building command list", disable_notification=True)
+
+
+@router.message(Command("seeddb"))
+async def cmd_seeddb(message: types.Message, command: CommandObject):
+    """Seed DB with a minimal set of records.
+
+    Idempotent: ensures the calling admin user exists.
+    Useful after moving DB volumes / first startup.
+    """
+    try:
+        await init_db()
+
+        u = message.from_user
+        if not u:
+            await message.reply("No user context", disable_notification=True)
+            return
+
+        user = await ensure_user_exists(
+            user_id=u.id,
+            username=u.username,
+            full_name=(u.full_name or "Unknown"),
+            tag=None,
+            language=getattr(message.from_user, "language_code", None) or "en",
+        )
+
+        try:
+            ts = datetime.datetime.utcnow().isoformat(timespec="seconds") + "Z"
+            await set_system_value("seeddb_last_run", ts)
+        except Exception:
+            pass
+
+        users = await get_all_users()
+        await message.reply(
+            f"✅ DB seeded\n"
+            f"User: {user.id}\n"
+            f"Total users in DB: {len(users)}",
+            disable_notification=True,
+        )
+    except Exception as e:
+        logger.error(f"Error in /seeddb: {e}")
+        await message.reply("Error seeding DB", disable_notification=True)
 
 
 def parse_time_to_seconds(time_str: str) -> int:
