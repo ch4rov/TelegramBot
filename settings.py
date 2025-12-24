@@ -4,6 +4,19 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+
+def _env_int(name: str, default: int = 0) -> int:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    raw = raw.strip()
+    if raw == "":
+        return default
+    try:
+        return int(raw)
+    except Exception:
+        return default
+
 IS_TEST_ENV = os.getenv("IS_TEST_ENV", "False").lower() in ("true", "1", "yes")
 
 BOT_TOKEN = os.getenv("TEST_BOT_TOKEN") if IS_TEST_ENV else os.getenv("BOT_TOKEN")
@@ -43,8 +56,8 @@ TEMP_DIR = "tempfiles"
 
 ENABLE_DISCORD_BOT_LOG = os.getenv("ENABLE_DISCORD_BOT_LOG", "False").lower() == "true"
 DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN")
-DISCORD_LOG_THREAD_ID_MAIN = int(os.getenv("DISCORD_LOG_THREAD_ID_MAIN", 0))
-DISCORD_LOG_THREAD_ID_TEST = int(os.getenv("DISCORD_LOG_THREAD_ID_TEST", 0))
+DISCORD_LOG_THREAD_ID_MAIN = _env_int("DISCORD_LOG_THREAD_ID_MAIN", 0)
+DISCORD_LOG_THREAD_ID_TEST = _env_int("DISCORD_LOG_THREAD_ID_TEST", 0)
 
 MAX_FILE_SIZE = 2000 * 1024 * 1024 if USE_LOCAL_SERVER else 50 * 1024 * 1024
 
