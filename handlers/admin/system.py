@@ -8,6 +8,8 @@ import datetime
 import asyncio
 import subprocess
 import shutil
+import sqlite3
+import uuid
 import settings
 from aiogram import Router, types, F
 from aiogram.filters import Command, CommandObject
@@ -16,6 +18,8 @@ from handlers.admin.filters import AdminFilter
 from services.database.repo import get_all_users
 from services.database.repo import ensure_user_exists, set_system_value
 from services.database.backup import send_db_backup
+from services.database.backup import get_sqlite_db_path
+from services.database.backup import _resolve_db_path
 from services.database.core import init_db
 
 logger = logging.getLogger(__name__)
@@ -214,6 +218,162 @@ async def cmd_seeddb(message: types.Message, command: CommandObject):
     except Exception as e:
         logger.error(f"Error in /seeddb: {e}")
         await message.reply("Error seeding DB", disable_notification=True)
+
+
+def _is_sqlite_file_header(data: bytes) -> bool:
+    return bool(data) and data.startswith(b"SQLite format 3\x00")
+
+
+def _sqlite_backup_file(src_path: str, dst_path: str) -> None:
+    src = sqlite3.connect(src_path)
+    try:
+        dst = sqlite3.connect(dst_path)
+        try:
+            src.backup(dst)
+            dst.commit()
+        finally:
+            dst.close()
+    finally:
+        src.close()
+
+
+def _sqlite_merge_missing_rows(dst_db_path: str, src_db_path: str) -> dict[str, int]:
+    """Merge rows from src_db into dst_db, inserting only missing ones.
+
+    Uses INSERT OR IGNORE on common tables.
+    Returns inserted row counts per table.
+    """
+    inserted: dict[str, int] = {}
+
+    con = sqlite3.connect(dst_db_path)
+    try:
+        con.execute("PRAGMA foreign_keys=OFF")
+        con.execute("ATTACH DATABASE ? AS src", (src_db_path,))
+
+        main_tables = {
+            r[0]
+            for r in con.execute(
+                "SELECT name FROM main.sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+            ).fetchall()
+        }
+        src_tables = {
+            r[0]
+            for r in con.execute(
+                "SELECT name FROM src.sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+            ).fetchall()
+        }
+        tables = sorted(main_tables & src_tables)
+
+        con.execute("BEGIN")
+        for table in tables:
+            cols_main = [r[1] for r in con.execute(f"PRAGMA main.table_info('{table}')").fetchall()]
+            cols_src = [r[1] for r in con.execute(f"PRAGMA src.table_info('{table}')").fetchall()]
+            cols = [c for c in cols_main if c in cols_src]
+            if not cols:
+                continue
+
+            col_list = ", ".join([f'"{c}"' for c in cols])
+            before = con.total_changes
+            con.execute(
+                f'INSERT OR IGNORE INTO main."{table}" ({col_list}) '
+                f'SELECT {col_list} FROM src."{table}"'
+            )
+            delta = con.total_changes - before
+            if delta:
+                inserted[table] = delta
+
+        con.commit()
+        con.execute("DETACH DATABASE src")
+        return inserted
+    except Exception:
+        try:
+            con.rollback()
+        except Exception:
+            pass
+        try:
+            con.execute("DETACH DATABASE src")
+        except Exception:
+            pass
+        raise
+    finally:
+        con.close()
+
+
+@router.message(Command("importdb"))
+async def cmd_importdb(message: types.Message, command: CommandObject):
+    """Admin: merge an uploaded sqlite DB into current DB (adds missing rows only).
+
+    Usage:
+    - Reply to a .db file with /importdb
+    - Or send /importdb with a .db document attached
+    """
+    try:
+        doc = message.document
+        if not doc and message.reply_to_message:
+            doc = getattr(message.reply_to_message, "document", None)
+
+        if not doc:
+            await message.reply(
+                "Send a .db file and reply with /importdb (or attach the file with /importdb).",
+                disable_notification=True,
+            )
+            return
+
+        # Download to temp
+        os.makedirs("tempfiles/import_db", exist_ok=True)
+        tmp_path = os.path.join("tempfiles", "import_db", f"{uuid.uuid4().hex}.db")
+
+        file_obj = await message.bot.get_file(doc.file_id)
+        file_content = await message.bot.download_file(file_obj.file_path)
+        data = file_content.read()
+        if not _is_sqlite_file_header(data):
+            await message.reply("This file is not a valid SQLite database.", disable_notification=True)
+            return
+
+        with open(tmp_path, "wb") as f:
+            f.write(data)
+
+        await init_db()
+
+        db_path = get_sqlite_db_path()
+        if not db_path:
+            await message.reply("Cannot determine current DB path.", disable_notification=True)
+            return
+        dst_path = _resolve_db_path(db_path)
+        if not os.path.exists(dst_path):
+            await message.reply(f"Current DB not found at: {dst_path}", disable_notification=True)
+            return
+
+        # Safety backup next to DB
+        ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        backup_path = os.path.join(os.path.dirname(dst_path), f"bot_backup_before_import_{ts}.db")
+        await asyncio.to_thread(_sqlite_backup_file, dst_path, backup_path)
+
+        inserted = await asyncio.to_thread(_sqlite_merge_missing_rows, dst_path, tmp_path)
+
+        total = sum(inserted.values())
+        if inserted:
+            top = sorted(inserted.items(), key=lambda x: x[1], reverse=True)[:8]
+            details = "\n".join([f"- {k}: +{v}" for k, v in top])
+        else:
+            details = "(no new rows)"
+
+        await message.reply(
+            "✅ DB import finished\n"
+            f"Inserted rows: {total}\n"
+            f"Backup: {backup_path}\n\n"
+            f"{details}",
+            disable_notification=True,
+        )
+    except Exception as e:
+        logger.error(f"Error in /importdb: {e}")
+        await message.reply("Error importing DB", disable_notification=True)
+    finally:
+        try:
+            if 'tmp_path' in locals() and tmp_path and os.path.exists(tmp_path):
+                os.remove(tmp_path)
+        except Exception:
+            pass
 
 
 def parse_time_to_seconds(time_str: str) -> int:
