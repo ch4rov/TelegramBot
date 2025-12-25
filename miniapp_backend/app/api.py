@@ -15,12 +15,16 @@ def _require_token() -> None:
         raise RuntimeError("BOT_TOKEN missing")
 
 
+def _clean_token(raw: str) -> str:
+    return (raw or "").strip().strip('"').strip("'").strip()
+
+
 def _candidate_tokens() -> list[str]:
     tokens: list[str] = []
     for raw in (
-        (os.getenv("BOT_TOKEN") or "").strip(),
-        (os.getenv("TEST_BOT_TOKEN") or "").strip(),
-        (BOT_TOKEN or "").strip(),
+        _clean_token(os.getenv("BOT_TOKEN") or ""),
+        _clean_token(os.getenv("TEST_BOT_TOKEN") or ""),
+        _clean_token(BOT_TOKEN or ""),
     ):
         if raw and raw not in tokens:
             tokens.append(raw)

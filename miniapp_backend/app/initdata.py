@@ -21,6 +21,10 @@ def validate_init_data(init_data: str, bot_token: str) -> dict:
     recv_hash = data.pop("hash", None)
     if not recv_hash:
         raise InitDataError("no_hash")
+    try:
+        recv_hash = str(recv_hash).lower()
+    except Exception:
+        pass
 
     sorted_items = sorted(data.items(), key=lambda kv: kv[0])
     payload = "\n".join([f"{k}={v}" for k, v in sorted_items])
