@@ -24,13 +24,19 @@ services:
       - ./.env
     volumes:
       - "${DATA_DIR:-telegrambot-data}:/data"
-    command: >
-      /bin/sh -c
-      'if [ "${IS_TEST_ENV}" = "True" ] || [ "${IS_TEST_ENV}" = "true" ] || [ "${IS_TEST_ENV}" = "1" ]; then
-         cloudflared tunnel --no-autoupdate --url "${ORIGIN_URL:-http://telegrambot:8089}" --logfile /data/cloudflared.log --loglevel info;
-       else
-         cloudflared tunnel --no-autoupdate run --token "${CLOUDFLARED_TUNNEL_TOKEN}";
-       fi'
+    command:
+      - /bin/sh
+      - -c
+      - |
+          set -e
+          if [ -n "${CLOUDFLARED_TUNNEL_TOKEN:-}" ]; then
+            echo "[cloudflared] Starting named tunnel"
+            exec cloudflared tunnel --no-autoupdate run --token "${CLOUDFLARED_TUNNEL_TOKEN}"
+          fi
+
+          ORIGIN_URL_EFFECTIVE="${ORIGIN_URL:-http://telegrambot:8089}"
+          echo "[cloudflared] Starting quick tunnel to ${ORIGIN_URL_EFFECTIVE}"
+          exec cloudflared tunnel --no-autoupdate --url "${ORIGIN_URL_EFFECTIVE}" --logfile /data/cloudflared.log --loglevel info
     networks:
       - ch4robo-network
     depends_on:
