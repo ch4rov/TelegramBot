@@ -57,8 +57,6 @@ def create_app() -> FastAPI:
 
     @app.get("/", response_class=HTMLResponse)
     async def index():
-        url = (PUBLIC_URL or "").strip().rstrip("/")
-        base = url if url else ""
         return HTMLResponse(
             """<!doctype html>
 <html>
@@ -73,18 +71,18 @@ def create_app() -> FastAPI:
     <div id="out" style="white-space: pre-wrap; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;"></div>
   <script>
     const out = document.getElementById('out');
+        const fallback = 'https://ch4rov.pl/';
     const tg = window.Telegram && window.Telegram.WebApp;
         if (tg) {
             try { tg.ready(); tg.expand(); } catch (e) {}
         }
         const initData = tg ? (tg.initData || '') : '';
-    const base = """ + repr(base) + """;
-    const apiBase = base ? base : '';
-        const urlMe = (apiBase || '') + '/api/me';
-        const urlAdmin = (apiBase || '') + '/api/admin/me';
+        const urlMe = '/api/me';
+        const urlAdmin = '/api/admin/me';
 
-        if (!initData) {
-            out.textContent = 'No initData. Open this page inside Telegram as a Mini App.';
+        if (!tg || !initData) {
+            out.textContent = 'Redirecting...';
+            try { window.location.replace(fallback); } catch (e) { window.location.href = fallback; }
         } else {
             fetch(urlMe, { headers: { 'X-Telegram-Init-Data': initData } })
                 .then(r => r.json().then(j => ({ ok: r.ok, status: r.status, j })))
@@ -109,10 +107,10 @@ def create_app() -> FastAPI:
 </html>"""
         )
 
-        @app.get("/api/me")
-        async def me(payload: dict = Depends(require_user)):
-                uid = user_id_from_init_data(payload)
-                return {"user_id": uid, "is_admin": bool(uid in set(ADMIN_IDS))}
+    @app.get("/api/me")
+    async def me(payload: dict = Depends(require_user)):
+        uid = user_id_from_init_data(payload)
+        return {"user_id": uid, "is_admin": bool(uid in set(ADMIN_IDS))}
 
     @app.get("/api/admin/me")
     async def admin_me(payload: dict = Depends(require_admin)):
