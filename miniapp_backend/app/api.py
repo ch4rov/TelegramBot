@@ -92,52 +92,28 @@ def create_app() -> FastAPI:
     @app.get("/", response_class=HTMLResponse)
     async def index():
         return HTMLResponse(
-            """<!doctype html>
-<html>
+                        """<!doctype html>
+<html lang="ru">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Mini App</title>
-  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Mini App</title>
+    <style>
+        html, body { height: 100%; margin: 0; }
+        body {
+            background: #0b0b0c;
+            color: #ffffff;
+            font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 40px;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+        }
+    </style>
 </head>
-<body style="font-family: system-ui; margin: 16px;">
-    <h3>Mini App</h3>
-    <div id="out" style="white-space: pre-wrap; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;"></div>
-  <script>
-    const out = document.getElementById('out');
-        const fallback = """ + repr(fallback_url) + """;
-    const tg = window.Telegram && window.Telegram.WebApp;
-        if (tg) {
-            try { tg.ready(); tg.expand(); } catch (e) {}
-        }
-        const initData = tg ? (tg.initData || '') : '';
-        const urlMe = '/api/me';
-        const urlAdmin = '/api/admin/me';
-
-        if (!tg || !initData) {
-            out.textContent = 'Redirecting...';
-            try { window.location.replace(fallback); } catch (e) { window.location.href = fallback; }
-        } else {
-            fetch(urlMe, { headers: { 'X-Telegram-Init-Data': initData } })
-                .then(r => r.json().then(j => ({ ok: r.ok, status: r.status, j })))
-                .then(async ({ ok, status, j }) => {
-                    if (!ok) {
-                        out.textContent = JSON.stringify({ ok, status, data: j, hint: 'If this is stable, ensure IS_TEST_ENV matches the bot token used by this bot.' }, null, 2);
-                        return;
-                    }
-                    const isAdmin = !!(j && j.is_admin);
-                    if (!isAdmin) {
-                        out.textContent = JSON.stringify({ ok: true, mode: 'user', data: j }, null, 2);
-                        return;
-                    }
-                    const r2 = await fetch(urlAdmin, { headers: { 'X-Telegram-Init-Data': initData } });
-                    const j2 = await r2.json().catch(() => ({}));
-                    out.textContent = JSON.stringify({ ok: r2.ok, status: r2.status, mode: 'admin', data: j2 }, null, 2);
-                })
-                .catch(err => { out.textContent = String(err); });
-        }
-  </script>
-</body>
+<body>привет</body>
 </html>"""
         )
 
