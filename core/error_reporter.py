@@ -3,6 +3,7 @@ import asyncio
 import logging
 import time
 import traceback
+import html
 from typing import Any, Iterable, Optional
 
 from core.config import config
@@ -53,36 +54,39 @@ class ErrorReporter:
         if not admins:
             return
 
-        lines = [
-            "🚨 Exception",
-            f"Place: {where}",
-            f"Type: {exc.__class__.__name__}",
-            f"Message: {exc}",
-        ]
+        place = where or "Update"
+        details: list[str] = []
+        details.append(f"Place: {place}")
+        details.append(f"Type: {exc.__class__.__name__}")
+        details.append(f"Message: {exc}")
         if user_id:
-            lines.append(f"User: {user_id}")
+            details.append(f"User: {user_id}")
         if chat_id:
-            lines.append(f"Chat: {chat_id}")
+            details.append(f"Chat: {chat_id}")
         if preview:
-            lines.append(f"Preview: {preview}")
+            details.append(f"What: {preview}")
         if extra:
             try:
-                lines.append(f"Extra: {extra}")
+                if isinstance(extra, dict):
+                    for k, v in extra.items():
+                        if v is None or v == "":
+                            continue
+                        details.append(f"{k}: {v}")
+                else:
+                    details.append(f"Extra: {extra}")
             except Exception:
                 pass
 
-        # Limit traceback length to avoid hitting Telegram message limit
-        tb_snippet = (tb[:3500] + "…") if len(tb) > 3500 else tb
-        lines.append("\nTraceback:\n" + tb_snippet)
+        tb_snippet = (tb[:3200] + "…") if len(tb) > 3200 else tb
+        body = "\n".join(details) + "\n\nTraceback:\n" + tb_snippet
+        text = "🚨 Exception\n<blockquote>" + html.escape(body) + "</blockquote>"
+        await self._safe_broadcast(admins, text, parse_mode="HTML")
 
-        text = "\n".join(lines)
-        await self._safe_broadcast(admins, text)
-
-    async def _safe_broadcast(self, admins: Iterable[int], text: str) -> None:
+    async def _safe_broadcast(self, admins: Iterable[int], text: str, parse_mode: str | None = None) -> None:
         tasks = []
         for admin_id in admins:
             try:
-                tasks.append(self._bot.send_message(admin_id, text))
+                tasks.append(self._bot.send_message(admin_id, text, parse_mode=parse_mode, disable_web_page_preview=True))
             except Exception:
                 # If scheduling fails, continue with others
                 continue

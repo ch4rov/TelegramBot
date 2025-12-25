@@ -14,7 +14,7 @@ import settings
 from urllib.parse import quote
 from aiogram import Router, types, F
 from aiogram.filters import Command, CommandObject
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
 from handlers.admin.filters import AdminFilter
 from services.database.repo import get_all_users
 from services.database.repo import ensure_user_exists, set_system_value
@@ -28,6 +28,33 @@ router = Router()
 router.message.filter(AdminFilter())
 
 _UPDATE_PENDING: dict[int, dict] = {}
+
+
+def _miniapp_url() -> str:
+    try:
+        from core.config import config
+        is_test = bool(getattr(config, "IS_TEST", False))
+    except Exception:
+        is_test = False
+
+    if is_test:
+        return (os.getenv("TEST_MINIAPP_PUBLIC_URL") or os.getenv("TEST_PUBLIC_BASE_URL") or os.getenv("MINIAPP_PUBLIC_URL") or os.getenv("PUBLIC_BASE_URL") or "").strip().rstrip("/")
+    return (os.getenv("MINIAPP_PUBLIC_URL") or os.getenv("PUBLIC_BASE_URL") or "").strip().rstrip("/")
+
+
+@router.message(Command("app"))
+async def cmd_app(message: types.Message):
+    url = _miniapp_url()
+    if not url:
+        await message.answer("MINIAPP_PUBLIC_URL is empty")
+        return
+
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="Open Mini App", web_app=WebAppInfo(url=url))]
+        ]
+    )
+    await message.answer(url, reply_markup=kb)
 
 
 async def _download_telegram_file_bytes(bot, file_path: str, file_id: str | None = None) -> bytes:
