@@ -1,17 +1,45 @@
 from datetime import datetime
+import os
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query
 from fastapi.responses import HTMLResponse
 
 from .config import ADMIN_IDS, BOT_TOKEN, PUBLIC_URL
 from .db import session
-from .initdata import InitDataError, user_id_from_init_data, validate_init_data, validate_init_data_admin
+from .initdata import InitDataError, user_id_from_init_data, validate_init_data
 from .models import User, UserRequest
 
 
 def _require_token() -> None:
-    if not BOT_TOKEN:
+    if not BOT_TOKEN and not (os.getenv("BOT_TOKEN") or os.getenv("TEST_BOT_TOKEN")):
         raise RuntimeError("BOT_TOKEN missing")
+
+
+def _candidate_tokens() -> list[str]:
+    tokens: list[str] = []
+    for raw in (
+        (os.getenv("BOT_TOKEN") or "").strip(),
+        (os.getenv("TEST_BOT_TOKEN") or "").strip(),
+        (BOT_TOKEN or "").strip(),
+    ):
+        if raw and raw not in tokens:
+            tokens.append(raw)
+    return tokens
+
+
+def _validate_any(init_data: str) -> dict:
+    if not init_data:
+        raise InitDataError("missing")
+    last_err: Exception | None = None
+    for tok in _candidate_tokens():
+        try:
+            return validate_init_data(init_data, tok)
+        except Exception as e:
+            last_err = e
+            continue
+    if isinstance(last_err, InitDataError):
+        raise last_err
+    raise InitDataError("bad_hash")
 
 
 def _read_init_data(
@@ -24,17 +52,21 @@ def _read_init_data(
 def require_admin(init_data: str = Depends(_read_init_data)) -> dict:
     _require_token()
     try:
-        return validate_init_data_admin(init_data, BOT_TOKEN, ADMIN_IDS)
-    except InitDataError as e:
-        if str(e) == "forbidden":
+        payload = _validate_any(init_data)
+        uid = user_id_from_init_data(payload)
+        if uid is None or int(uid) not in set(int(x) for x in (ADMIN_IDS or [])):
             raise HTTPException(status_code=403, detail="forbidden")
+        return payload
+    except HTTPException:
+        raise
+    except InitDataError:
         raise HTTPException(status_code=401, detail="bad_init_data")
 
 
 def require_user(init_data: str = Depends(_read_init_data)) -> dict:
     _require_token()
     try:
-        return validate_init_data(init_data, BOT_TOKEN)
+        return _validate_any(init_data)
     except InitDataError:
         raise HTTPException(status_code=401, detail="bad_init_data")
 
@@ -50,6 +82,8 @@ def _iso(dt: datetime | None) -> str | None:
 
 def create_app() -> FastAPI:
     app = FastAPI()
+
+    fallback_url = (os.getenv("MINIAPP_FALLBACK_URL") or "https://ch4rov.pl/").strip() or "https://ch4rov.pl/"
 
     @app.get("/health")
     async def health():
@@ -71,7 +105,7 @@ def create_app() -> FastAPI:
     <div id="out" style="white-space: pre-wrap; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;"></div>
   <script>
     const out = document.getElementById('out');
-        const fallback = 'https://ch4rov.pl/';
+        const fallback = """ + repr(fallback_url) + """;
     const tg = window.Telegram && window.Telegram.WebApp;
         if (tg) {
             try { tg.ready(); tg.expand(); } catch (e) {}
