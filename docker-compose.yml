@@ -60,6 +60,34 @@ services:
     networks:
       - ch4robo-network
 
+  github-webhook:
+    build:
+      context: .
+      dockerfile: tools/github_webhook/Dockerfile
+    container_name: ch4robo-webhook
+    restart: unless-stopped
+    env_file:
+      - ./.env
+    environment:
+      GITHUB_WEBHOOK_HOST: 0.0.0.0
+      GITHUB_WEBHOOK_PORT: 8091
+      GITHUB_WEBHOOK_REPO_DIR: /repo
+      GITHUB_WEBHOOK_BRANCH: ${GITHUB_WEBHOOK_BRANCH:-main}
+      GITHUB_WEBHOOK_SERVICES: ${GITHUB_WEBHOOK_SERVICES:-telegrambot miniapp-backend}
+      GITHUB_WEBHOOK_HARD_RESET: ${GITHUB_WEBHOOK_HARD_RESET:-false}
+    volumes:
+      - ./:/repo
+      - /var/run/docker.sock:/var/run/docker.sock
+    expose:
+      - "8091"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8091/health').read()"]
+      interval: 10s
+      timeout: 3s
+      retries: 15
+    networks:
+      - ch4robo-network
+
   miniapp-backend:
     build:
       context: .
