@@ -1,7 +1,6 @@
 name: ch4robo
 
 services:
-  # Telegram Bot API (Local Server для файлов >50MB)
   telegram-bot-api:
     image: aiogram/telegram-bot-api:latest
     container_name: ch4robo-api
@@ -10,83 +9,34 @@ services:
       - ./.env
     volumes:
       - telegram-api-data:/var/lib/telegram-bot-api
+    expose:
+      - "8081"
     ports:
       - "8081:8081"
     networks:
       - ch4robo-network
 
-  # Cloudflared Tunnel (для OAuth callback через публичный URL)
-  cloudflared:
-    image: cloudflare/cloudflared:latest
-    container_name: ch4robo-auth
+  telegrambot:
+    build:
+      context: .
+    container_name: ch4robo-bot
     restart: unless-stopped
     env_file:
       - ./.env
+    environment:
+      DB_TYPE: sqlite
+      DB_PATH: /data/bot.db
+      USE_LOCAL_SERVER: "True"
+      LOCAL_SERVER_URL: "http://telegram-bot-api:8081"
     volumes:
       - "${DATA_DIR:-telegrambot-data}:/data"
-    command:
-      - tunnel
-      - --no-autoupdate
-      - run
-      - --token
-      - ${CLOUDFLARED_TUNNEL_TOKEN}
+    ports:
+      - "8088:8088"
+      - "8089:8089"
     networks:
       - ch4robo-network
     depends_on:
-      - telegrambot
-
-  autoupdater:
-    image: docker:27-cli
-    container_name: ch4robo-autoupdater
-    restart: unless-stopped
-    working_dir: /repo
-    volumes:
-      - ./:/repo
-      - /var/run/docker.sock:/var/run/docker.sock
-    environment:
-      GIT_BRANCH: ${AUTOUPDATE_GIT_BRANCH:-main}
-      POLL_SEC: ${AUTOUPDATE_POLL_SEC:-60}
-      COMPOSE_SERVICES: ${AUTOUPDATE_SERVICES:-telegrambot miniapp-backend}
-      HARD_RESET: ${AUTOUPDATE_HARD_RESET:-false}
-      REPO_DIR: /repo
-    command:
-      - /bin/sh
-      - -lc
-      - |
-          set -e
-          apk add --no-cache git docker-cli-compose >/dev/null
-          chmod +x /repo/tools/autoupdater/run.sh
-          exec /repo/tools/autoupdater/run.sh
-    networks:
-      - ch4robo-network
-
-  github-webhook:
-    build:
-      context: .
-      dockerfile: tools/github_webhook/Dockerfile
-    container_name: ch4robo-webhook
-    restart: unless-stopped
-    env_file:
-      - ./.env
-    environment:
-      GITHUB_WEBHOOK_HOST: 0.0.0.0
-      GITHUB_WEBHOOK_PORT: 8091
-      GITHUB_WEBHOOK_REPO_DIR: /repo
-      GITHUB_WEBHOOK_BRANCH: ${GITHUB_WEBHOOK_BRANCH:-main}
-      GITHUB_WEBHOOK_SERVICES: ${GITHUB_WEBHOOK_SERVICES:-telegrambot miniapp-backend}
-      GITHUB_WEBHOOK_HARD_RESET: ${GITHUB_WEBHOOK_HARD_RESET:-false}
-    volumes:
-      - ./:/repo
-      - /var/run/docker.sock:/var/run/docker.sock
-    expose:
-      - "8091"
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8091/health').read()"]
-      interval: 10s
-      timeout: 3s
-      retries: 15
-    networks:
-      - ch4robo-network
+      - telegram-bot-api
 
   miniapp-backend:
     build:
@@ -114,30 +64,15 @@ services:
     depends_on:
       - telegrambot
 
-  # Основной бот
-  telegrambot:
-    build:
-      context: .
-    container_name: ch4robo-bot
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: ch4robo-auth
     restart: unless-stopped
-    volumes:
-      # Default: named volume (portable, no dependency on host disk paths)
-      # Override: set DATA_DIR to an absolute path (e.g. B:/telegrambot/data) to use a bind mount
-      - "${DATA_DIR:-telegrambot-data}:/data"
     env_file:
       - ./.env
-    environment:
-      DB_TYPE: sqlite
-      DB_PATH: /data/bot.db
-      USE_LOCAL_SERVER: "True"
-      LOCAL_SERVER_URL: "http://telegram-bot-api:8081"
-    ports:
-      - "8088:8088"
-      - "8089:8089"
+    command: ["tunnel", "--no-autoupdate", "run", "--token", "${CLOUDFLARED_TUNNEL_TOKEN}"]
     networks:
       - ch4robo-network
-    depends_on:
-      - telegram-bot-api
 
 networks:
   ch4robo-network:

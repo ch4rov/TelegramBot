@@ -20,6 +20,7 @@ from aiohttp.client_exceptions import ClientResponseError
 from core.config import config
 from services.database.repo import is_user_banned, increment_request_count, upsert_cached_media, log_user_request
 from services.platforms.TelegramDownloader.workflow import fix_local_path
+from core.queue_manager import queue_manager
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -211,6 +212,20 @@ async def _optimize_video_size(
 class VideoNoteState(StatesGroup):
     recording = State()
 
+
+def _extract_video_payload(message: types.Message):
+    """Return (file_id, file_unique_id, file_size) for video-like message, else (None, None, None)."""
+    if getattr(message, "video", None):
+        v = message.video
+        return v.file_id, getattr(v, "file_unique_id", None), getattr(v, "file_size", None)
+    if getattr(message, "document", None):
+        d = message.document
+        mime = (getattr(d, "mime_type", "") or "").lower()
+        name = (getattr(d, "file_name", "") or "").lower()
+        if mime.startswith("video/") or name.endswith((".mp4", ".mov", ".m4v", ".webm", ".mkv")):
+            return d.file_id, getattr(d, "file_unique_id", None), getattr(d, "file_size", None)
+    return None, None, None
+
 @router.message(Command("videomessage"))
 async def cmd_videomessage(message: types.Message, state: FSMContext):
     """Video message mode"""
@@ -259,171 +274,166 @@ async def exit_mode(message: types.Message, state: FSMContext):
 
 @router.message(VideoNoteState.recording, F.video)
 async def process_video(message: types.Message, user_lang: str = "en"):
-    """Process video"""
-    status = None
-    stop = asyncio.Event()
-    current_action = ChatAction.UPLOAD_DOCUMENT
-    pulse_task: asyncio.Task | None = None
-    try:
-        status = await safe_reply(message, "⏳", disable_notification=True)
+    """Process one video sequentially (per-user queue)."""
 
-        def _get_action():
-            return current_action
+    user = message.from_user
+    if not user:
+        return
 
-        pulse_task = asyncio.create_task(_pulse_action(message, _get_action, stop))
+    file_id, file_unique_id, file_size = _extract_video_payload(message)
+    if not file_id:
+        return
 
-        # Bots can't download very large user-uploaded files via getFile (Telegram-side limit).
+    async def _run():
+        status = None
+        stop = asyncio.Event()
+        current_action = ChatAction.UPLOAD_DOCUMENT
+        pulse_task: asyncio.Task | None = None
+
         try:
-            if message.video and message.video.file_size and message.video.file_size > 20 * 1024 * 1024:
-                await safe_reply(message, _t(user_lang, "too_big"), disable_notification=True)
+            status = await safe_reply(message, "⏳", disable_notification=True)
+
+            def _get_action():
+                return current_action
+
+            pulse_task = asyncio.create_task(_pulse_action(message, _get_action, stop))
+
+            # Bots can't download very large user-uploaded files via getFile (Telegram-side limit).
+            try:
+                if file_size and file_size > 20 * 1024 * 1024:
+                    await safe_reply(message, _t(user_lang, "too_big"), disable_notification=True)
+                    return
+            except Exception:
+                pass
+
+            cache_key = None
+            try:
+                cache_key = f"tg:video_note:{file_unique_id or file_id}"
+            except Exception:
+                cache_key = f"tg:video_note:{file_id}"
+
+            temp_dir = "tempfiles"
+            os.makedirs(temp_dir, exist_ok=True)
+
+            input_path = os.path.join(temp_dir, f"vid_in_{uuid.uuid4()}.mp4")
+            output_path = os.path.join(temp_dir, f"vid_out_{uuid.uuid4()}.mp4")
+
+            try:
+                await _download_video_to_path(message.bot, file_id, input_path)
+            except ClientResponseError as e:
+                # Some Local Bot API deployments are started with --local and don't serve files via /file,
+                # which results in 404s. In that case, fall back to the public Bot API for downloads.
+                if config.USE_LOCAL_SERVER and e.status == 404:
+                    logger.warning("Local Bot API /file returned 404; falling back to public Bot API for download")
+                    public_bot = Bot(
+                        token=message.bot.token,
+                        session=AiohttpSession(),
+                        default=DefaultBotProperties(parse_mode=None),
+                    )
+                    try:
+                        await _download_video_to_path(public_bot, file_id, input_path)
+                    finally:
+                        try:
+                            await public_bot.session.close()
+                        except Exception:
+                            pass
+                else:
+                    raise
+
+            # Stage: converting into video note
+            current_action = ChatAction.RECORD_VIDEO_NOTE
+
+            ffmpeg_path = _find_ffmpeg()
+            try:
+                if ffmpeg_path and os.path.isfile(ffmpeg_path):
+                    ffdir = os.path.dirname(ffmpeg_path)
+                    os.environ["PATH"] = ffdir + os.pathsep + os.environ.get("PATH", "")
+            except Exception:
+                pass
+
+            vf = "crop=min(iw\\,ih):min(iw\\,ih),scale=640:640"
+            ok = await _optimize_video_size(
+                ffmpeg_path=ffmpeg_path,
+                input_path=input_path,
+                output_path=output_path,
+                max_size_mb=49.0,
+                vf=vf,
+            )
+            if not ok:
+                raise Exception("Failed to encode video")
+
+            if os.path.exists(output_path):
+                current_action = ChatAction.UPLOAD_VIDEO_NOTE
                 try:
-                    if status:
-                        await status.delete()
+                    sent = await message.reply_video_note(FSInputFile(output_path), disable_notification=True)
+                except Exception:
+                    sent = await message.answer_video_note(FSInputFile(output_path), disable_notification=True)
+                try:
+                    os.remove(output_path)
                 except Exception:
                     pass
-                stop.set()
-                if pulse_task:
-                    try:
-                        await pulse_task
-                    except Exception:
-                        pass
-                return
-        except Exception:
-            pass
-        
-        file_id = message.video.file_id
-        cache_key = None
-        try:
-            # Use file_unique_id to avoid token-specific file_id volatility.
-            cache_key = f"tg:video_note:{message.video.file_unique_id}"
-        except Exception:
-            cache_key = f"tg:video_note:{file_id}"
-        
-        temp_dir = "tempfiles"
-        os.makedirs(temp_dir, exist_ok=True)
-        
-        input_path = os.path.join(temp_dir, f"vid_in_{uuid.uuid4()}.mp4")
-        output_path = os.path.join(temp_dir, f"vid_out_{uuid.uuid4()}.mp4")
-        
-        try:
-            await _download_video_to_path(message.bot, file_id, input_path)
-        except ClientResponseError as e:
-            # Some Local Bot API deployments are started with --local and don't serve files via /file,
-            # which results in 404s. In that case, fall back to the public Bot API for downloads.
-            if config.USE_LOCAL_SERVER and e.status == 404:
-                logger.warning("Local Bot API /file returned 404; falling back to public Bot API for download")
-                public_bot = Bot(
-                    token=message.bot.token,
-                    session=AiohttpSession(),
-                    default=DefaultBotProperties(parse_mode=None),
-                )
+                logger.info(f"User {message.from_user.id} converted video to video note")
+
                 try:
-                    await _download_video_to_path(public_bot, file_id, input_path)
-                finally:
-                    try:
-                        await public_bot.session.close()
-                    except Exception:
-                        pass
+                    if sent and getattr(sent, "video_note", None) and cache_key:
+                        cache = await upsert_cached_media(
+                            message.from_user.id,
+                            cache_key,
+                            sent.video_note.file_id,
+                            "video_note",
+                            title="Video note",
+                        )
+                        await log_user_request(
+                            message.from_user.id,
+                            kind="videomessage",
+                            input_text="/videomessage",
+                            url=cache_key,
+                            media_type="video_note",
+                            title="Video note",
+                            cache_hit=False,
+                            cache_id=cache.id,
+                        )
+                except Exception:
+                    pass
             else:
-                raise
-        except Exception:
-            raise
+                await safe_reply(message, "❌ Error converting video", disable_notification=True)
 
-        # Stage: converting into video note
-        current_action = ChatAction.RECORD_VIDEO_NOTE
-        
-        # FFmpeg: Crop to square (min side), scale 640x640, format mp4
-        ffmpeg_path = _find_ffmpeg()
-        # Ensure directory of ffmpeg is in PATH (avoids WSL shims on Windows)
-        try:
-            if ffmpeg_path and os.path.isfile(ffmpeg_path):
-                ffdir = os.path.dirname(ffmpeg_path)
-                os.environ["PATH"] = ffdir + os.pathsep + os.environ.get("PATH", "")
-        except Exception:
-            pass
-
-        vf = "crop=min(iw\\,ih):min(iw\\,ih),scale=640:640"
-        
-        # Optimize video size: encode and re-encode if needed to fit in 49 MB
-        ok = await _optimize_video_size(
-            ffmpeg_path=ffmpeg_path,
-            input_path=input_path,
-            output_path=output_path,
-            max_size_mb=49.0,
-            vf=vf,
-        )
-        if not ok:
-            raise Exception("Failed to encode video")
-        
-        if os.path.exists(output_path):
-            # Stage: uploading video note to Telegram
-            current_action = ChatAction.UPLOAD_VIDEO_NOTE
             try:
-                sent = await message.reply_video_note(FSInputFile(output_path), disable_notification=True)
-            except Exception:
-                sent = await message.answer_video_note(FSInputFile(output_path), disable_notification=True)
-            os.remove(output_path)
-            logger.info(f"User {message.from_user.id} converted video to video note")
-
-            # Cache + history
-            try:
-                if sent and getattr(sent, "video_note", None) and cache_key:
-                    cache = await upsert_cached_media(
-                        message.from_user.id,
-                        cache_key,
-                        sent.video_note.file_id,
-                        "video_note",
-                        title="Video note",
-                    )
-                    await log_user_request(
-                        message.from_user.id,
-                        kind="videomessage",
-                        input_text="/videomessage",
-                        url=cache_key,
-                        media_type="video_note",
-                        title="Video note",
-                        cache_hit=False,
-                        cache_id=cache.id,
-                    )
-            except Exception:
-                pass
-        else:
-            await safe_reply(message, "❌ Error converting video", disable_notification=True)
-        
-        if os.path.exists(input_path):
-            os.remove(input_path)
-        
-        try:
-            await status.delete()
-        except:
-            pass
-
-        stop.set()
-        if pulse_task:
-            try:
-                await pulse_task
+                if os.path.exists(input_path):
+                    os.remove(input_path)
             except Exception:
                 pass
 
-    except Exception as e:
-        logger.exception("Error processing video")
-        if isinstance(e, TelegramBadRequest) and "file is too big" in str(e).lower():
-            await safe_reply(message, _t(user_lang, "too_big"), disable_notification=True, parse_mode=None)
-        else:
-            # Avoid HTML parsing errors from angle brackets in exception texts (bot default parse_mode is HTML).
-            await safe_reply(message, _t(user_lang, "generic_error"), disable_notification=True, parse_mode=None)
-        try:
-            if status:
-                await status.delete()
-        except Exception:
-            pass
-
-        stop.set()
-        if pulse_task:
+        except Exception as e:
+            logger.exception("Error processing video")
+            if isinstance(e, TelegramBadRequest) and "file is too big" in str(e).lower():
+                await safe_reply(message, _t(user_lang, "too_big"), disable_notification=True, parse_mode=None)
+            else:
+                await safe_reply(message, _t(user_lang, "generic_error"), disable_notification=True, parse_mode=None)
+        finally:
             try:
-                await pulse_task
+                if status:
+                    await status.delete()
             except Exception:
                 pass
+
+            stop.set()
+            if pulse_task:
+                try:
+                    await pulse_task
+                except Exception:
+                    pass
+
+    await queue_manager.run_serial(user.id, _run)
+
+
+@router.message(VideoNoteState.recording, F.document)
+async def process_video_document(message: types.Message, user_lang: str = "en"):
+    """Handle videos sent as documents in /videomessage mode."""
+    file_id, _, _ = _extract_video_payload(message)
+    if not file_id:
+        return
+    await process_video(message, user_lang=user_lang)
 
 # --- Helpers: ffmpeg/ffprobe discovery ---
 def _find_ffmpeg() -> str:

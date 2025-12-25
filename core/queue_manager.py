@@ -6,6 +6,12 @@ class QueueManager:
         # Словарь локов: для каждого user_id свой замок
         self._locks = defaultdict(asyncio.Lock)
 
+    async def run_serial(self, user_id, coro_func):
+        """Run a coroutine sequentially per-user, without swallowing exceptions."""
+        lock = self._locks[user_id]
+        async with lock:
+            return await coro_func()
+
     async def process_task(self, user_id, task_func):
         """
         Гарантирует, что для одного юзера задачи выполняются по очереди.
