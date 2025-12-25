@@ -36,6 +36,32 @@ services:
     depends_on:
       - telegrambot
 
+  miniapp-backend:
+    build:
+      context: .
+    container_name: ch4robo-miniapp
+    restart: unless-stopped
+    env_file:
+      - ./.env
+    command: ["python", "-m", "miniapp_backend.run_miniapp"]
+    environment:
+      MINIAPP_BACKEND_HOST: "0.0.0.0"
+      MINIAPP_BACKEND_PORT: "8090"
+      DB_PATH: /data/bot.db
+    volumes:
+      - "${DATA_DIR:-telegrambot-data}:/data"
+    expose:
+      - "8090"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8090/health').read()"]
+      interval: 10s
+      timeout: 3s
+      retries: 15
+    networks:
+      - ch4robo-network
+    depends_on:
+      - telegrambot
+
   # Основной бот
   telegrambot:
     build:

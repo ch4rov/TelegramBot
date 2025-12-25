@@ -1,12 +1,13 @@
 # Как запустить ch4roBO в Docker (Windows)
 
 ## Что это такое
-**ch4roBO** — это единая Docker Compose группа из трёх связанных сервисов:
+**ch4roBO** — это единая Docker Compose группа из четырёх связанных сервисов:
 1. **ch4robo-bot** — основной Telegram бот
 2. **ch4robo-api** — Telegram Bot API Local Server (для файлов >50MB)
-3. **ch4robo-auth** — Cloudflared tunnel (для OAuth callback через публичный URL)
+3. **ch4robo-miniapp** — Mini App backend (FastAPI)
+4. **ch4robo-auth** — Cloudflared tunnel (для публичных доменов)
 
-Все три контейнера запускаются вместе одной командой и работают в общей сети `ch4robo-network`.
+Все контейнеры запускаются вместе одной командой и работают в общей сети `ch4robo-network`.
 
 ## Что потребуется
 - Docker Desktop (с WSL2 backend)
@@ -33,13 +34,13 @@
    - `TECH_CHAT_ID`
    - `TELEGRAM_API_ID` и `TELEGRAM_API_HASH` (для Local API)
    - `CLOUDFLARED_TUNNEL_TOKEN` (для PROD домена)
-   - `PUBLIC_BASE_URL` (например `https://botmenu.ch4rov.pl`)
    - `MINIAPP_PUBLIC_URL` (например `https://botmenu.ch4rov.pl`)
+   - `PUBLIC_BASE_URL` (рекомендуется отдельный домен для OAuth, например `https://botoauth.ch4rov.pl`)
    - Для TEST можно оставить `TEST_PUBLIC_BASE_URL` пустым: в тесте cloudflared поднимет quick tunnel и бот попробует сам взять URL из `/data/cloudflared.log`
    - `TEST_MINIAPP_PUBLIC_URL` (например `https://botmenutesting.ch4rov.pl`) если используешь тестовый поддомен
    - `TEST_SPOTIFY_CLIENT_ID` и `TEST_SPOTIFY_CLIENT_SECRET` (опционально для Spotify)
 
-3) Запусти все три контейнера:
+3) Запусти все контейнеры:
    ```powershell
    docker compose up -d --build
    ```
@@ -77,24 +78,28 @@ docker compose logs -f --tail=200
 ch4robo-network (Docker network)
 ├── ch4robo-bot        (основной бот, порты 8088/8089)
 ├── ch4robo-api        (Local API, порт 8081)
+├── ch4robo-miniapp    (Mini App backend, порт 8090)
 └── ch4robo-auth       (Cloudflared tunnel)
 ```
 
 - Бот обращается к Local API по имени `telegram-bot-api:8081` внутри сети
-- Cloudflared пробрасывает порт 8089 (или 8088) наружу через tunnel
+- Cloudflared пробрасывает наружу нужные сервисы по hostname (см. ниже)
 - База SQLite хранится в `./data/bot.db` на хосте
 - Данные Local API в Docker volume `ch4robo-api-data`
 
 ## Частые вопросы
 **Q: Нужно ли запускать контейнеры по отдельности?**  
-A: Нет. `docker compose up -d` запускает все три сразу. Без Local API бот не сможет отправлять файлы >50MB, без туннеля не будет работать OAuth.
+A: Нет. `docker compose up -d` запускает всю группу сразу. Без Local API бот не сможет отправлять файлы >50MB, без туннеля не будет работать OAuth.
 
 **Q: Как проверить, что Local API работает?**  
 A: `docker compose logs telegram-bot-api` — там должна быть строка `Server started`. В боте выстави `USE_LOCAL_SERVER=True` в compose (уже выставлено).
 
 **Q: Cloudflare tunnel не подключается?**  
 A: 
-- PROD: проверь `CLOUDFLARED_TUNNEL_TOKEN` в `.env` и в Cloudflare Dashboard настрой Public Hostname `botmenu.ch4rov.pl` → Service `http://telegrambot:8088`
+- PROD: проверь `CLOUDFLARED_TUNNEL_TOKEN` в `.env` и в Cloudflare Dashboard → Tunnel → Public Hostnames:
+   - `botmenu.ch4rov.pl` → Service `http://miniapp-backend:8090`
+   - `botoauth.ch4rov.pl` → Service `http://telegrambot:8089`
+   (если OAuth тебе не нужен — `PUBLIC_BASE_URL` можно оставить пустым, OAuth-сервер тогда не стартует)
 - TEST: при `IS_TEST_ENV=True` по умолчанию используется quick tunnel на `ORIGIN_URL` (по умолчанию `http://telegrambot:8089`). Если хочешь тестовый домен `botmenutesting.ch4rov.pl`, создай отдельный Tunnel в Cloudflare и выставь `TEST_PUBLIC_BASE_URL=https://botmenutesting.ch4rov.pl`
 
 Примечание: `telegrambot` — это имя сервиса в `docker-compose.yml` внутри сети Docker. `ch4robo-bot` — `container_name` (алиас), но в документации используем `telegrambot`.
