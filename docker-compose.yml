@@ -24,9 +24,8 @@ services:
       - ./.env
     volumes:
       - "${DATA_DIR:-telegrambot-data}:/data"
+    entrypoint: ["/bin/sh", "-c"]
     command:
-      - /bin/sh
-      - -c
       - |
           set -e
           if [ -n "${CLOUDFLARED_TUNNEL_TOKEN:-}" ]; then
