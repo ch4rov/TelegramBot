@@ -31,6 +31,14 @@ def require_admin(init_data: str = Depends(_read_init_data)) -> dict:
         raise HTTPException(status_code=401, detail="bad_init_data")
 
 
+def require_user(init_data: str = Depends(_read_init_data)) -> dict:
+    _require_token()
+    try:
+        return validate_init_data(init_data, BOT_TOKEN)
+    except InitDataError:
+        raise HTTPException(status_code=401, detail="bad_init_data")
+
+
 def _iso(dt: datetime | None) -> str | None:
     if not dt:
         return None
@@ -61,23 +69,50 @@ def create_app() -> FastAPI:
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
 </head>
 <body style="font-family: system-ui; margin: 16px;">
-  <h3>Mini App (admin-only)</h3>
-  <div id="out" style="white-space: pre-wrap; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;"></div>
+    <h3>Mini App</h3>
+    <div id="out" style="white-space: pre-wrap; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;"></div>
   <script>
     const out = document.getElementById('out');
     const tg = window.Telegram && window.Telegram.WebApp;
-    const initData = tg ? tg.initData : '';
+        if (tg) {
+            try { tg.ready(); tg.expand(); } catch (e) {}
+        }
+        const initData = tg ? (tg.initData || '') : '';
     const base = """ + repr(base) + """;
     const apiBase = base ? base : '';
-    const url = (apiBase || '') + '/api/admin/me';
-    fetch(url, { headers: { 'X-Telegram-Init-Data': initData } })
-      .then(r => r.json().then(j => ({ ok: r.ok, status: r.status, j })))
-      .then(({ ok, status, j }) => { out.textContent = JSON.stringify({ ok, status, data: j }, null, 2); })
-      .catch(err => { out.textContent = String(err); });
+        const urlMe = (apiBase || '') + '/api/me';
+        const urlAdmin = (apiBase || '') + '/api/admin/me';
+
+        if (!initData) {
+            out.textContent = 'No initData. Open this page inside Telegram as a Mini App.';
+        } else {
+            fetch(urlMe, { headers: { 'X-Telegram-Init-Data': initData } })
+                .then(r => r.json().then(j => ({ ok: r.ok, status: r.status, j })))
+                .then(async ({ ok, status, j }) => {
+                    if (!ok) {
+                        out.textContent = JSON.stringify({ ok, status, data: j, hint: 'If this is stable, ensure IS_TEST_ENV matches the bot token used by this bot.' }, null, 2);
+                        return;
+                    }
+                    const isAdmin = !!(j && j.is_admin);
+                    if (!isAdmin) {
+                        out.textContent = JSON.stringify({ ok: true, mode: 'user', data: j }, null, 2);
+                        return;
+                    }
+                    const r2 = await fetch(urlAdmin, { headers: { 'X-Telegram-Init-Data': initData } });
+                    const j2 = await r2.json().catch(() => ({}));
+                    out.textContent = JSON.stringify({ ok: r2.ok, status: r2.status, mode: 'admin', data: j2 }, null, 2);
+                })
+                .catch(err => { out.textContent = String(err); });
+        }
   </script>
 </body>
 </html>"""
         )
+
+        @app.get("/api/me")
+        async def me(payload: dict = Depends(require_user)):
+                uid = user_id_from_init_data(payload)
+                return {"user_id": uid, "is_admin": bool(uid in set(ADMIN_IDS))}
 
     @app.get("/api/admin/me")
     async def admin_me(payload: dict = Depends(require_admin)):

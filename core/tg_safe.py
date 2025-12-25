@@ -20,3 +20,17 @@ async def safe_reply(message: types.Message, text: str = "", **kwargs: Any):
 async def safe_reply_html(message: types.Message, text: str, **kwargs: Any):
     kwargs.setdefault("parse_mode", "HTML")
     return await safe_reply(message, text, **kwargs)
+
+
+async def safe_edit_text(message: types.Message, text: str = "", **kwargs: Any):
+    if text is None:
+        text = ""
+    try:
+        return await message.edit_text(text, **kwargs)
+    except Exception:
+        return await safe_reply(message, text, **kwargs)
+
+
+async def safe_edit_html(message: types.Message, text: str, **kwargs: Any):
+    kwargs.setdefault("parse_mode", "HTML")
+    return await safe_edit_text(message, text, **kwargs)

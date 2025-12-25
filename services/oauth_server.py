@@ -12,18 +12,49 @@ from services.database.repo import consume_oauth_state, upsert_user_oauth_token,
 logger = logging.getLogger(__name__)
 
 
+_LAST_LOGIN_MESSAGE: dict[int, tuple[int, int]] = {}
+
+
+def set_last_login_message(user_id: int, chat_id: int, message_id: int) -> None:
+    try:
+        _LAST_LOGIN_MESSAGE[int(user_id)] = (int(chat_id), int(message_id))
+    except Exception:
+        return
+
+
+def get_last_login_message(user_id: int) -> tuple[int, int] | None:
+    try:
+        return _LAST_LOGIN_MESSAGE.get(int(user_id))
+    except Exception:
+        return None
+
+
 def _html_page(title: str, body: str, status: int = 200) -> web.Response:
+    bot_username = (getattr(config, "PROD_BOT_USERNAME", "") or "").strip().lstrip("@")
+    bot_link = f"https://t.me/{bot_username}" if bot_username else ""
     html = f"""<!doctype html>
 <html lang=\"en\">
 <head>
   <meta charset=\"utf-8\" />
   <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />
   <title>{title}</title>
+    <style>
+        body {{ font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 20px; }}
+        .muted {{ color: #666; font-size: 13px; }}
+        .btn {{ display: inline-block; padding: 10px 14px; border-radius: 10px; border: 1px solid #ddd; text-decoration: none; }}
+    </style>
 </head>
 <body>
   <h3>{title}</h3>
   <p>{body}</p>
-  <p>You can now return to Telegram.</p>
+    <p class=\"muted\">This page will close in 3 seconds.</p>
+    {f'<p><a class="btn" href="{bot_link}">Open Telegram</a></p>' if bot_link else ''}
+    <script>
+        setTimeout(function() {{
+            try {{ window.close(); }} catch (e) {{}}
+            {f"try {{ window.location.href = '{bot_link}'; }} catch (e) {{}}" if bot_link else ""}
+        }}, 3000);
+    </script>
 </body>
 </html>"""
     return web.Response(text=html, status=status, content_type="text/html")
@@ -214,10 +245,25 @@ class OAuthServer:
             scope=scope,
         )
 
-        try:
-            await self._bot.send_message(user_id, "✅ Spotify connected", disable_notification=True)
-        except Exception:
-            logger.exception("Failed to notify user about Spotify connect")
+        msg = get_last_login_message(user_id)
+        if msg:
+            chat_id, message_id = msg
+            try:
+                await self._bot.edit_message_text(
+                    "✅ Spotify подключён. Вернись в чат и нажми /login, если нужно переподключить.",
+                    chat_id=chat_id,
+                    message_id=message_id,
+                )
+            except Exception:
+                try:
+                    await self._bot.send_message(user_id, "✅ Spotify connected", disable_notification=True)
+                except Exception:
+                    logger.exception("Failed to notify user about Spotify connect")
+        else:
+            try:
+                await self._bot.send_message(user_id, "✅ Spotify connected", disable_notification=True)
+            except Exception:
+                logger.exception("Failed to notify user about Spotify connect")
 
         return _html_page("Spotify OAuth", "Connected successfully")
 

@@ -64,7 +64,7 @@ TEST_PUBLIC_BASE_URL=
 
 # Local HTTP server for OAuth callbacks (the tunnel points to this)
 OAUTH_HTTP_HOST=127.0.0.1
-OAUTH_HTTP_PORT=8088
+OAUTH_HTTP_PORT=8089
 TEST_OAUTH_HTTP_PORT=8089
 
 # Spotify OAuth (separate apps for test/prod are recommended)
@@ -139,9 +139,9 @@ class Settings:
         self.OAUTH_HTTP_HOST = (os.getenv("OAUTH_HTTP_HOST") or default_oauth_host).strip() or default_oauth_host
         port_var = "TEST_OAUTH_HTTP_PORT" if self.IS_TEST else "OAUTH_HTTP_PORT"
         try:
-            self.OAUTH_HTTP_PORT = int(os.getenv(port_var, "8089" if self.IS_TEST else "8088"))
+            self.OAUTH_HTTP_PORT = int(os.getenv(port_var, "8089"))
         except Exception:
-            self.OAUTH_HTTP_PORT = 8089 if self.IS_TEST else 8088
+            self.OAUTH_HTTP_PORT = 8089
 
         # Spotify
         self.SPOTIFY_CLIENT_ID = (os.getenv("TEST_SPOTIFY_CLIENT_ID" if self.IS_TEST else "SPOTIFY_CLIENT_ID", "") or "").strip()

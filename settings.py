@@ -44,9 +44,9 @@ PUBLIC_BASE_URL = PUBLIC_BASE_URL.strip().rstrip("/")
 
 OAUTH_HTTP_HOST = (os.getenv("OAUTH_HTTP_HOST") or "127.0.0.1").strip() or "127.0.0.1"
 try:
-    OAUTH_HTTP_PORT = int((os.getenv("TEST_OAUTH_HTTP_PORT") if IS_TEST_ENV else os.getenv("OAUTH_HTTP_PORT")) or ("8089" if IS_TEST_ENV else "8088"))
+    OAUTH_HTTP_PORT = int((os.getenv("TEST_OAUTH_HTTP_PORT") if IS_TEST_ENV else os.getenv("OAUTH_HTTP_PORT")) or "8089")
 except Exception:
-    OAUTH_HTTP_PORT = 8089 if IS_TEST_ENV else 8088
+    OAUTH_HTTP_PORT = 8089
 
 SPOTIFY_CLIENT_ID = (os.getenv("TEST_SPOTIFY_CLIENT_ID") if IS_TEST_ENV else os.getenv("SPOTIFY_CLIENT_ID")) or ""
 SPOTIFY_CLIENT_SECRET = (os.getenv("TEST_SPOTIFY_CLIENT_SECRET") if IS_TEST_ENV else os.getenv("SPOTIFY_CLIENT_SECRET")) or ""

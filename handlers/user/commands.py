@@ -8,6 +8,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from handlers.user.router import user_router
 from core.tg_safe import safe_reply, safe_reply_html
+from core.tg_safe import safe_edit_html
 from services.database.repo import (
     is_user_banned,
     increment_request_count,
@@ -22,6 +23,7 @@ from services.database.repo import (
 from services.lastfm_service import get_user_recent_track
 from core.config import config
 from services.oauth_server import build_spotify_authorize_url
+from services.oauth_server import set_last_login_message
 from services.database.repo import get_user_pref_bool, set_user_pref_bool
 from services.spotify_service import spotify_get_json
 
@@ -118,7 +120,12 @@ async def cmd_login(message: types.Message, command: CommandObject):
                 text.append("Last.fm: send <code>/login USERNAME</code>.")
 
             kb = await _login_kb(user.id, lang)
-            await safe_reply_html(message, "\n".join(text), reply_markup=kb, disable_notification=True)
+            sent = await safe_reply_html(message, "\n".join(text), reply_markup=kb, disable_notification=True)
+            if sent:
+                try:
+                    set_last_login_message(user.id, sent.chat.id, sent.message_id)
+                except Exception:
+                    pass
             return
         
         lastfm_username = command.args.strip()
@@ -141,13 +148,44 @@ async def cb_login(call: types.CallbackQuery):
     lang = await get_user_language(user.id)
     action = (call.data or "").split(":", 1)[1]
 
+    if call.message:
+        try:
+            set_last_login_message(user.id, call.message.chat.id, call.message.message_id)
+        except Exception:
+            pass
+
+    if action == "menu":
+        await call.answer("OK")
+        kb = await _login_kb(user.id, lang)
+        text = []
+        if lang == "ru":
+            text.append("<b>Подключение аккаунтов</b>")
+            text.append("")
+            text.append("Здесь ты подключаешь Spotify и Last.fm, чтобы бот мог показывать/отправлять музыку в inline.")
+            text.append("")
+            text.append("Как использовать Spotify: открой inline, просто упомяни бота без текста.")
+            text.append("Last.fm: отправь <code>/login USERNAME</code>.")
+        else:
+            text.append("<b>Connect accounts</b>")
+            text.append("")
+            text.append("Connect Spotify and/or Last.fm so the bot can show/share music in inline mode.")
+            text.append("")
+            text.append("Spotify usage: open inline and mention the bot with empty query.")
+            text.append("Last.fm: send <code>/login USERNAME</code>.")
+        if call.message:
+            await safe_edit_html(call.message, "\n".join(text), reply_markup=kb, disable_notification=True)
+        return
+
     if action == "lastfm":
         lf = await get_lastfm_username(user.id)
         await call.answer("OK")
+        kb = await _login_kb(user.id, lang)
         if lf:
-            await safe_reply_html(call.message, (f"✅ Last.fm подключен: <code>{_h(lf)}</code>" if lang == "ru" else f"✅ Last.fm connected: <code>{_h(lf)}</code>"), disable_notification=True)
+            msg = (f"✅ Last.fm подключен: <code>{_h(lf)}</code>" if lang == "ru" else f"✅ Last.fm connected: <code>{_h(lf)}</code>")
         else:
-            await safe_reply_html(call.message, ("Отправь <code>/login USERNAME</code>, чтобы подключить Last.fm." if lang == "ru" else "Send <code>/login USERNAME</code> to connect Last.fm."), disable_notification=True)
+            msg = ("Отправь <code>/login USERNAME</code>, чтобы подключить Last.fm." if lang == "ru" else "Send <code>/login USERNAME</code> to connect Last.fm.")
+        if call.message:
+            await safe_edit_html(call.message, msg, reply_markup=kb, disable_notification=True)
         return
 
     if action in ("spotify",):
@@ -164,17 +202,12 @@ async def cb_login(call: types.CallbackQuery):
 
         if not config.PUBLIC_BASE_URL:
             await call.answer("OK")
-            await safe_reply(
-                call.message,
-                (
-                    "Не задан PUBLIC_BASE_URL/TEST_PUBLIC_BASE_URL (адрес туннеля).\n"
-                    "Сначала подними Cloudflare Tunnel/ngrok и запиши URL в .env.\n"
-                    "См: docs/api_tokens.md"
-                    if lang == "ru"
-                    else "PUBLIC_BASE_URL/TEST_PUBLIC_BASE_URL is empty (tunnel URL). Set it in .env first. See docs/api_tokens.md"
-                ),
-                disable_notification=True,
-            )
+            if call.message:
+                await safe_edit_html(
+                    call.message,
+                    ("Не задан PUBLIC_BASE_URL/TEST_PUBLIC_BASE_URL (публичный домен OAuth)." if lang == "ru" else "PUBLIC_BASE_URL/TEST_PUBLIC_BASE_URL is empty (OAuth public URL)."),
+                    disable_notification=True,
+                )
             return
 
         svc = action
@@ -191,20 +224,26 @@ async def cb_login(call: types.CallbackQuery):
             state = await create_oauth_state(user.id, "spotify")
             url = build_spotify_authorize_url(state)
             await call.answer("OK")
-            await safe_reply(
-                call.message,
-                (
-                    ("Переподключение Spotify: старая привязка будет заменена.\n\n" if tok and lang == "ru" else "")
-                    + "Открой ссылку и разреши доступ:\n" + url + "\n\n"
-                    f"Redirect URI в Spotify должен быть: {config.PUBLIC_BASE_URL}/oauth/spotify/callback"
-                    if lang == "ru"
-                    else ("Reconnecting Spotify: your previous link will be replaced.\n\n" if tok else "")
-                    + "Open this URL to connect Spotify:\n"
-                    + url
-                    + f"\n\nRedirect URI must be: {config.PUBLIC_BASE_URL}/oauth/spotify/callback"
-                ),
-                disable_notification=True,
-            )
+            if call.message:
+                text = []
+                if lang == "ru":
+                    if tok:
+                        text.append("Переподключение Spotify: старая привязка будет заменена.")
+                        text.append("")
+                    text.append("Нажми кнопку ниже и разреши доступ.")
+                else:
+                    if tok:
+                        text.append("Reconnecting Spotify: your previous link will be replaced.")
+                        text.append("")
+                    text.append("Tap the button below and allow access.")
+
+                kb = InlineKeyboardMarkup(
+                    inline_keyboard=[
+                        [InlineKeyboardButton(text=("🔐 Авторизоваться в Spotify" if lang == "ru" else "🔐 Authorize Spotify"), url=url)],
+                        [InlineKeyboardButton(text=("↩️ Назад" if lang == "ru" else "↩️ Back"), callback_data="login:menu")],
+                    ]
+                )
+                await safe_edit_html(call.message, "\n".join(text), reply_markup=kb, disable_notification=True)
             return
 
 
