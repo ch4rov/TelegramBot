@@ -35,6 +35,31 @@ services:
     depends_on:
       - telegrambot
 
+  autoupdater:
+    image: docker:27-cli
+    container_name: ch4robo-autoupdater
+    restart: unless-stopped
+    working_dir: /repo
+    volumes:
+      - ./:/repo
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      GIT_BRANCH: ${AUTOUPDATE_GIT_BRANCH:-main}
+      POLL_SEC: ${AUTOUPDATE_POLL_SEC:-60}
+      COMPOSE_SERVICES: ${AUTOUPDATE_SERVICES:-telegrambot miniapp-backend}
+      HARD_RESET: ${AUTOUPDATE_HARD_RESET:-false}
+      REPO_DIR: /repo
+    command:
+      - /bin/sh
+      - -lc
+      - |
+          set -e
+          apk add --no-cache git docker-cli-compose >/dev/null
+          chmod +x /repo/tools/autoupdater/run.sh
+          exec /repo/tools/autoupdater/run.sh
+    networks:
+      - ch4robo-network
+
   miniapp-backend:
     build:
       context: .
