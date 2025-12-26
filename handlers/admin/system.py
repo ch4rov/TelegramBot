@@ -62,6 +62,7 @@ async def cmd_rename_tavern(message: types.Message):
     """Manually rename the tavern channel to a random nickname."""
     try:
         from services.tavern_declension import get_tavern_name
+        from aiogram.errors import TelegramBadRequest
         
         new_name = get_tavern_name()
         
@@ -72,6 +73,41 @@ async def cmd_rename_tavern(message: types.Message):
             chat_id=tavern_channel_id,
             title=new_name
         )
+        
+        # Try to delete the system message about title change
+        # System message is posted immediately after set_chat_title
+        await asyncio.sleep(0.5)
+        
+        # Get chat to find the latest message
+        try:
+            # We'll try to delete recent messages by guessing message IDs
+            # The system message about title change is usually the most recent
+            # We post a temporary message and then delete it to find the right ID
+            temp_msg = await message.bot.send_message(
+                chat_id=tavern_channel_id,
+                text="🔄",
+                disable_notification=True
+            )
+            temp_msg_id = temp_msg.message_id
+            
+            # Delete our temporary message
+            await asyncio.sleep(0.2)
+            await message.bot.delete_message(chat_id=tavern_channel_id, message_id=temp_msg_id)
+            
+            # Now try to delete the system message (it should be just before our temp message)
+            # Try deleting a few messages before our temp message
+            for msg_id in range(temp_msg_id - 1, max(temp_msg_id - 5, 0), -1):
+                try:
+                    await message.bot.delete_message(chat_id=tavern_channel_id, message_id=msg_id)
+                    logger.info(f"[Tavern] Deleted system message ID {msg_id}")
+                    break
+                except TelegramBadRequest:
+                    # Message doesn't exist or can't be deleted, try next
+                    pass
+                except Exception as e:
+                    logger.debug(f"[Tavern] Could not delete message {msg_id}: {e}")
+        except Exception as e:
+            logger.debug(f"[Tavern] Could not clean up system message: {e}")
         
         await message.answer(f"✅ Таверна переименована: <b>{new_name}</b>", parse_mode="HTML", disable_notification=True)
         logger.info(f"Admin {message.from_user.id} manually renamed tavern to: {new_name}")

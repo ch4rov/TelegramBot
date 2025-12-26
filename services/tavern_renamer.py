@@ -43,6 +43,36 @@ async def schedule_tavern_renamer(bot: Bot):
                     title=new_name
                 )
                 logger.info(f"[Tavern] Channel renamed to: {new_name}")
+                
+                # Try to delete the system message about title change
+                await asyncio.sleep(0.5)
+                try:
+                    # Post a temporary message to find the right position
+                    temp_msg = await bot.send_message(
+                        chat_id=TAVERN_CHANNEL_ID,
+                        text="🔄",
+                        disable_notification=True
+                    )
+                    temp_msg_id = temp_msg.message_id
+                    
+                    # Delete our temporary message
+                    await asyncio.sleep(0.2)
+                    await bot.delete_message(chat_id=TAVERN_CHANNEL_ID, message_id=temp_msg_id)
+                    
+                    # Try to delete the system message (should be near our temp message)
+                    from aiogram.errors import TelegramBadRequest
+                    for msg_id in range(temp_msg_id - 1, max(temp_msg_id - 5, 0), -1):
+                        try:
+                            await bot.delete_message(chat_id=TAVERN_CHANNEL_ID, message_id=msg_id)
+                            logger.info(f"[Tavern] Deleted system message ID {msg_id}")
+                            break
+                        except TelegramBadRequest:
+                            pass
+                        except Exception:
+                            pass
+                except Exception as e:
+                    logger.debug(f"[Tavern] Could not clean up system message: {e}")
+                    
             except Exception as e:
                 logger.error(f"[Tavern] Failed to rename channel: {e}")
                 # Retry after 1 minute if it fails
