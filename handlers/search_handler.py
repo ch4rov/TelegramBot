@@ -621,9 +621,16 @@ async def cb_download_ytm_clip(cb: types.CallbackQuery, user_lang: str = "en"):
             shutil.rmtree(folder, ignore_errors=True)
 
 # --- ОБРАБОТКА ССЫЛОК В ЧАТЕ ---
+# Tavern channel ID - no link processing in this channel
+TAVERN_CHANNEL_ID = 1767700689
+
 @router.message(F.text, ~F.text.startswith("/"))
 async def message_handler(message: types.Message, user_lang: str = "en"):
     text = message.text.strip()
+    
+    # Skip link processing in tavern channel
+    if message.chat.id == TAVERN_CHANNEL_ID:
+        return
     
     if is_valid_url(text):
         status = await message.answer("⏳")

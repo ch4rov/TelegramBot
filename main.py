@@ -17,6 +17,7 @@ from services.placeholder_service import ensure_placeholders
 from services.oauth_server import OAuthServer
 from services.database.backup import run_periodic_db_backup
 from core.error_reporter import ErrorReporter
+from services.tavern_renamer import schedule_tavern_renamer
 
 # Импорты мидлварей
 from middlewares.logger import LoggingMiddleware
@@ -119,14 +120,16 @@ async def main():
     oauth_server = OAuthServer(bot)
 
     _db_backup_task: asyncio.Task | None = None
+    _tavern_renamer_task: asyncio.Task | None = None
 
     async def _oauth_startup(*args, **kwargs):
         await oauth_server.start()
 
     async def _backup_startup(*args, **kwargs):
-        nonlocal _db_backup_task
+        nonlocal _db_backup_task, _tavern_renamer_task
         try:
             _db_backup_task = asyncio.create_task(run_periodic_db_backup(bot))
+            _tavern_renamer_task = asyncio.create_task(schedule_tavern_renamer(bot))
 
             def _report_task_exception(t: asyncio.Task):
                 try:
@@ -153,7 +156,7 @@ async def main():
         await oauth_server.stop()
 
     async def _backup_shutdown(*args, **kwargs):
-        nonlocal _db_backup_task
+        nonlocal _db_backup_task, _tavern_renamer_task
         if _db_backup_task:
             _db_backup_task.cancel()
             try:
@@ -161,6 +164,13 @@ async def main():
             except Exception:
                 pass
             _db_backup_task = None
+        if _tavern_renamer_task:
+            _tavern_renamer_task.cancel()
+            try:
+                await _tavern_renamer_task
+            except Exception:
+                pass
+            _tavern_renamer_task = None
 
     dp.startup.register(_oauth_startup)
     dp.startup.register(_backup_startup)
