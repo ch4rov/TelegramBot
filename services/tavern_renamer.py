@@ -38,7 +38,7 @@ async def schedule_tavern_renamer(bot: Bot):
             # Perform the rename
             try:
                 new_name = get_tavern_name()
-                await bot.edit_chat_title(
+                await bot.set_chat_title(
                     chat_id=TAVERN_CHANNEL_ID,
                     title=new_name
                 )

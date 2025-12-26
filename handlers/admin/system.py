@@ -68,7 +68,7 @@ async def cmd_rename_tavern(message: types.Message):
         # Tavern channel ID (same as in search_handler.py)
         tavern_channel_id = -1001767700689
         
-        await message.bot.edit_chat_title(
+        await message.bot.set_chat_title(
             chat_id=tavern_channel_id,
             title=new_name
         )
@@ -105,9 +105,10 @@ async def cmd_tavern_status(message: types.Message):
         hours = int(time_until // 3600)
         minutes = int((time_until % 3600) // 60)
         
+        separator = "═" * 30
         text = (
-            "🏰 <b>Статус Таверны</b>\n"
-            "═" * 30 + "\n\n"
+            f"🏰 <b>Статус Таверны</b>\n"
+            f"{separator}\n\n"
             f"📝 <b>Текущее имя:</b> {chat.title}\n"
             f"🆔 <b>Channel ID:</b> <code>{chat.id}</code>\n"
             f"📊 <b>Доступных кличек:</b> {total_nicknames}\n\n"
