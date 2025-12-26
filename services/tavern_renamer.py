@@ -60,14 +60,11 @@ async def schedule_tavern_renamer(bot: Bot):
                     await bot.delete_message(chat_id=TAVERN_CHANNEL_ID, message_id=temp_msg_id)
                     
                     # Try to delete the system message (should be near our temp message)
-                    from aiogram.errors import TelegramBadRequest
                     for msg_id in range(temp_msg_id - 1, max(temp_msg_id - 5, 0), -1):
                         try:
                             await bot.delete_message(chat_id=TAVERN_CHANNEL_ID, message_id=msg_id)
                             logger.info(f"[Tavern] Deleted system message ID {msg_id}")
                             break
-                        except TelegramBadRequest:
-                            pass
                         except Exception:
                             pass
                 except Exception as e:

@@ -62,7 +62,6 @@ async def cmd_rename_tavern(message: types.Message):
     """Manually rename the tavern channel to a random nickname."""
     try:
         from services.tavern_declension import get_tavern_name
-        from aiogram.errors import TelegramBadRequest
         
         new_name = get_tavern_name()
         
@@ -101,11 +100,9 @@ async def cmd_rename_tavern(message: types.Message):
                     await message.bot.delete_message(chat_id=tavern_channel_id, message_id=msg_id)
                     logger.info(f"[Tavern] Deleted system message ID {msg_id}")
                     break
-                except TelegramBadRequest:
+                except Exception:
                     # Message doesn't exist or can't be deleted, try next
                     pass
-                except Exception as e:
-                    logger.debug(f"[Tavern] Could not delete message {msg_id}: {e}")
         except Exception as e:
             logger.debug(f"[Tavern] Could not clean up system message: {e}")
         
