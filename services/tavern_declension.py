@@ -171,12 +171,15 @@ def get_tavern_name(nickname: Optional[str] = None) -> str:
     """
     Generate tavern channel name with proper Russian declension.
     If nickname is None, picks a random one.
+    All words are capitalized.
     """
     if nickname is None:
         nickname = random.choice(NICKNAMES)
     
     genitive = get_genitive(nickname)
-    return f"Таверна {genitive}"
+    # Capitalize first letter of genitive form
+    genitive_capitalized = genitive[0].upper() + genitive[1:] if genitive else genitive
+    return f"Таверна {genitive_capitalized}"
 
 
 def get_random_nickname() -> str:
