@@ -57,6 +57,79 @@ async def cmd_app(message: types.Message):
     await message.answer(url, reply_markup=kb)
 
 
+@router.message(Command("rename_tavern"))
+async def cmd_rename_tavern(message: types.Message):
+    """Manually rename the tavern channel to a random nickname."""
+    try:
+        from services.tavern_declension import get_tavern_name
+        
+        new_name = get_tavern_name()
+        
+        # Tavern channel ID (same as in search_handler.py)
+        tavern_channel_id = -1001767700689
+        
+        await message.bot.edit_chat_title(
+            chat_id=tavern_channel_id,
+            title=new_name
+        )
+        
+        await message.answer(f"✅ Таверна переименована: <b>{new_name}</b>", parse_mode="HTML", disable_notification=True)
+        logger.info(f"Admin {message.from_user.id} manually renamed tavern to: {new_name}")
+        
+    except Exception as e:
+        logger.error(f"Error renaming tavern: {e}")
+        await message.answer(f"❌ Ошибка при переименовании: {e}", disable_notification=True)
+
+
+@router.message(Command("tavern_status"))
+async def cmd_tavern_status(message: types.Message):
+    """Check tavern channel status and configuration."""
+    try:
+        from services.tavern_declension import NICKNAMES, get_random_nickname
+        
+        tavern_channel_id = -1001767700689
+        
+        # Get current channel info
+        chat = await message.bot.get_chat(tavern_channel_id)
+        
+        # Count nicknames
+        total_nicknames = len(NICKNAMES)
+        
+        # Next scheduled rename time (5 AM)
+        from datetime import datetime, timedelta
+        now = datetime.now()
+        next_5am = now.replace(hour=5, minute=0, second=0, microsecond=0)
+        if now >= next_5am:
+            next_5am += timedelta(days=1)
+        time_until = (next_5am - now).total_seconds()
+        hours = int(time_until // 3600)
+        minutes = int((time_until % 3600) // 60)
+        
+        text = (
+            "🏰 <b>Статус Таверны</b>\n"
+            "═" * 30 + "\n\n"
+            f"📝 <b>Текущее имя:</b> {chat.title}\n"
+            f"🆔 <b>Channel ID:</b> <code>{chat.id}</code>\n"
+            f"📊 <b>Доступных кличек:</b> {total_nicknames}\n\n"
+            f"⏰ <b>Следующее переименование:</b>\n"
+            f"   {next_5am.strftime('%Y-%m-%d %H:%M:%S')}\n"
+            f"   (через {hours}ч {minutes}мин)\n\n"
+            f"🎲 <b>Примеры кличек:</b>\n"
+        )
+        
+        # Show 5 random examples
+        examples = [get_random_nickname() for _ in range(5)]
+        for ex in examples:
+            text += f"   • {ex}\n"
+        
+        await message.answer(text, parse_mode="HTML", disable_notification=True)
+        logger.info(f"Admin {message.from_user.id} checked tavern status")
+        
+    except Exception as e:
+        logger.error(f"Error checking tavern status: {e}")
+        await message.answer(f"❌ Ошибка: {e}", disable_notification=True)
+
+
 async def _download_telegram_file_bytes(bot, file_path: str, file_id: str | None = None) -> bytes:
     """Download a Telegram file.
 
